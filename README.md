@@ -40,16 +40,23 @@ Generators, module builders, manifest installers, and CLI scaffolding tools repe
 
 ## Key Features
 
-* **Single-File Compilation & Scaffolding:**
-  * `renderFile()`: Compile an individual stub into a string with token replacements and host override support.
-  * `scaffoldFile()`: Write a compiled stub directly to a destination with safe skip/overwrite controls.
-* **Tree-Preserving Scaffolding:**
-  * `scaffoldTree()`: Mirror nested directory hierarchies from templates into target directories without structure loss.
-* **Dual-Axis Token Interpolation:** Replace tokens in both file contents AND file/directory pathnames simultaneously.
-* **Seamless Host Overrides:** Automatically checks for host project overrides (e.g. in `stubs/`) before falling back to package defaults.
-* **Configurable Extension Stripping:** Automatically removes `.stub` (default: `StubEngine::DEFAULT_STUB_EXTENSION`) or any custom extension from output filenames.
-* **Pure Decoupled Design:** Built on `Illuminate\Filesystem\Filesystem`. Usable across console commands, service providers, background jobs, or standalone CLI tools.
-* **Typed DTOs:** Returns a typed `ScaffoldResult` object with rendered relative paths, file counts, and override detection.
+* **Dual Override Strategies (`Overlay` vs `Replace`):**
+  * **`OverrideStrategy::Overlay` (Default):** Cascading file-by-file overlay. If a host project customizes 1 file out of 10, the other 9 package defaults are preserved.
+  * **`OverrideStrategy::Replace`:** Complete directory substitution ("all-or-nothing"). Perfect for document bundles, template suites, or thematic assets where a custom template completely replaces the default directory layout.
+* **Configurable Delimiters & Zero-Trust Fallbacks:**
+  * Globally customize placeholder delimiters (e.g. `<% %>` or `[[ ]]`) via `config/stub-engine.php` to eliminate syntax collisions with Blade (`{{ $var }}`), Vue, Jinja, or bash.
+  * Override delimiters on a per-call basis at runtime.
+  * Zero-trust resilience: falls back gracefully to `StubEngine::DEFAULT_TOKEN_OPEN_DELIMITER` (`{{`) and `StubEngine::DEFAULT_TOKEN_CLOSE_DELIMITER` (`}}`) even if config is absent or empty.
+* **Global & Dynamic Tokens:**
+  * Define application-wide global tokens (e.g. `company_name`, `year`, `author`) in `config/stub-engine.php`.
+  * Runtime tokens seamlessly merge and take precedence over global tokens.
+* **Dual-Axis Token Interpolation:** Replace tokens in both file contents AND file/directory pathnames simultaneously (e.g. `src/<% Module|studly %>.php.stub`).
+* **Built-in Token Modifiers & Collision Safety:**
+  * Automatic string casing: `studly`, `camel`, `kebab`, `snake`, `lower`, `upper`, `title`, `plural`, and `singular`.
+  * Substring collision prevention: longest token keys are replaced first (`{{ item_id }}` before `{{ item }}`).
+* **Safe Overwrite & Dry-Run Modes:** Prevent accidental file overwrites (`force: false`) and simulate execution non-destructively for CLI commands (`dryRun: true`).
+* **Decoupled Architecture:** Built on `Illuminate\Filesystem\Filesystem`. Usable across console commands, service providers, background jobs, or standalone CLI tools.
+* **Rich, Countable DTOs:** Returns a typed `ScaffoldResult` object implementing `\Countable` with granular file status arrays (`createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`) and helper inspection methods.
 
 ---
 
@@ -189,51 +196,148 @@ class MakeModuleCommand extends Command
 }
 ```
 
-### 2. Allowing Host Stub Overrides via `vendor:publish`
+### 2. Configuration & Global Tokens
 
-To allow host applications to customize your package's stubs, register publishable assets in your service provider:
+Publish the package configuration file to customize delimiters and register application-wide tokens:
 
-```php
-namespace Acme\Generator;
-
-use Illuminate\Support\ServiceProvider;
-
-class GeneratorServiceProvider extends ServiceProvider
-{
-    public function boot(): void
-    {
-        if ($this->app->runningInConsole()) {
-            $this->publishes([
-                __DIR__ . '/../stubs' => base_path('stubs/modules'),
-            ], 'module-stubs');
-        }
-    }
-}
+```bash
+php artisan vendor:publish --tag=stub-engine-config
 ```
 
-When users run `php artisan vendor:publish --tag=module-stubs`, they can modify the templates in `stubs/modules/`. **StubEngine** will automatically detect those files and prioritize them over package defaults.
-
-### 3. Inspecting Scaffold Results
-
-The `ScaffoldResult` object returned by `scaffoldTree()` provides structured metadata:
+The published `config/stub-engine.php` file:
 
 ```php
-$result = $engine->scaffoldTree(...);
+return [
+    /*
+    |--------------------------------------------------------------------------
+    | Token Delimiters
+    |--------------------------------------------------------------------------
+    | Customize delimiters to avoid syntax collisions with Blade ({{ $var }}),
+    | Vue, Jinja, or bash scripts.
+    */
+    'delimiters' => [
+        'open' => env('STUB_ENGINE_OPEN_DELIMITER', '{{'),
+        'close' => env('STUB_ENGINE_CLOSE_DELIMITER', '}}'),
+    ],
 
-// Full path of the template directory utilized
-$sourceUsed = $result->sourceDir;
+    /*
+    |--------------------------------------------------------------------------
+    | Global Tokens
+    |--------------------------------------------------------------------------
+    | Shared tokens merged automatically into every scaffolding operation.
+    */
+    'global_tokens' => [
+        'company' => env('STUB_ENGINE_COMPANY_NAME', 'Acme Corp'),
+        'year' => date('Y'),
+    ],
+];
+```
 
-// Target directory where files were scaffolded
-$targetDir = $result->targetDir;
+### 3. Dual Override Strategies: `Overlay` vs `Replace`
 
-// True if host overrides were used; false if package defaults were used
-$isCustomized = $result->isOverride;
+When consumer applications provide custom stubs, choose between two distinct strategies using `OverrideStrategy`:
 
-// Array of relative file paths that were generated (e.g. ['src/MyTool.php', 'composer.json'])
-$files = $result->renderedFiles;
+```php
+use AlexKassel\StubEngine\Enums\OverrideStrategy;
+use AlexKassel\StubEngine\Facades\StubEngine;
 
-// Total number of written files
-$total = $result->fileCount;
+// Strategy A: Overlay (Default cascading merge)
+// If the override directory contains 1 file out of 10, the other 9 package defaults are preserved.
+$result = StubEngine::scaffoldTree(
+    sourceDir: __DIR__ . '/../stubs',
+    targetDir: base_path('app/Modules/Billing'),
+    tokens: ['name' => 'Billing'],
+    overrideDir: base_path('stubs/modules'),
+    strategy: OverrideStrategy::Overlay,
+);
+
+// Strategy B: Replace ("All-or-Nothing" complete substitution)
+// Ideal for document packages or custom suites where the consumer directory completely replaces the default layout.
+$docResult = StubEngine::scaffoldTree(
+    sourceDir: __DIR__ . '/../sample_docs',
+    targetDir: storage_path('app/client_docs'),
+    tokens: ['client' => 'Globex'],
+    overrideDir: base_path('stubs/client_docs'),
+    strategy: OverrideStrategy::Replace,
+);
+```
+
+### 4. Custom Delimiters (Preventing Syntax Collisions)
+
+When scaffolding templates that already contain Blade, Vue, or bash syntax, specify custom delimiters at runtime or via config:
+
+```php
+$result = StubEngine::scaffoldTree(
+    sourceDir: __DIR__ . '/../blade_stubs',
+    targetDir: resource_path('views/modules/billing'),
+    tokens: ['entity' => 'user profile'],
+    openDelimiter: '<%',
+    closeDelimiter: '%>',
+);
+```
+
+In your stubs and file paths, use `<% entity|studly %>` or `<% entity|kebab %>`, while preserving native Blade syntax like `{{ $user->name }}` without interference.
+
+### 5. Built-in Token Case Modifiers
+
+Tokens can be automatically transformed using built-in pipe modifiers in both file contents and file paths:
+
+```php
+$result = StubEngine::scaffoldTree(
+    sourceDir: __DIR__ . '/../stubs',
+    targetDir: base_path('app/Modules/Billing'),
+    tokens: [
+        'entity' => 'user profile',
+    ],
+);
+```
+
+In any stub file or file path, you can use:
+* `{{ entity|studly }}` → `UserProfile`
+* `{{ entity|camel }}` → `userProfile`
+* `{{ entity|kebab }}` → `user-profile`
+* `{{ entity|snake }}` → `user_profile`
+* `{{ entity|lower }}` → `user profile`
+* `{{ entity|upper }}` → `USER PROFILE`
+* `{{ entity|title }}` → `User Profile`
+* `{{ entity|plural }}` → `user profiles`
+* `{{ entity|singular }}` → `user profile`
+
+### 6. Inspecting Scaffold Results & Dry-Run Mode
+
+The `ScaffoldResult` object implements `\Countable` and provides fine-grained visibility into file operations:
+
+```php
+$result = StubEngine::scaffoldTree(
+    sourceDir: __DIR__ . '/../stubs',
+    targetDir: base_path('packages/acme/my-tool'),
+    tokens: ['name' => 'MyTool'],
+    overrideDir: base_path('stubs/custom'),
+    force: false,   // Skip existing files
+    dryRun: true,   // Preview changes without writing to disk
+);
+
+// Count of rendered files
+echo count($result); // or $result->totalFiles()
+
+// Detailed file categorizations
+$created     = $result->createdFiles;     // ['src/MyTool.php']
+$overwritten = $result->overwrittenFiles; // []
+$skipped     = $result->skippedFiles;     // ['composer.json']
+$overridden  = $result->overrideFiles;    // ['src/MyTool.php']
+
+// Status helpers
+if ($result->hasOverrides()) {
+    echo "Custom host stubs were utilized!";
+}
+
+if ($result->hasSkipped()) {
+    echo "Some files already existed and were protected from overwriting.";
+}
+
+if ($result->isReplace()) {
+    echo "Directory was generated using complete Replace strategy.";
+}
 ```
 
 ---
@@ -247,6 +351,8 @@ public function renderFile(
     string $sourceFile,
     array $tokens,
     ?string $overrideFile = null,
+    ?string $openDelimiter = null,
+    ?string $closeDelimiter = null,
 ): string
 ```
 
@@ -257,6 +363,8 @@ Renders a single stub file into a string with token replacements.
 | `$sourceFile` | `string` | *(required)* | Path to the default fallback stub file. |
 | `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
 | `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
+| `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter (falls back to config or `{{`). |
+| `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter (falls back to config or `}}`). |
 
 *Throws `InvalidArgumentException` if neither the override file nor the source file exists.*
 
@@ -271,6 +379,9 @@ public function scaffoldFile(
     array $tokens,
     ?string $overrideFile = null,
     bool $force = false,
+    bool $dryRun = false,
+    ?string $openDelimiter = null,
+    ?string $closeDelimiter = null,
 ): bool
 ```
 
@@ -283,8 +394,11 @@ Scaffolds a single stub file to a target destination with token replacements.
 | `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
 | `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
 | `$force` | `bool` | `false` | When `false`, skips existing files. When `true`, overwrites them. |
+| `$dryRun` | `bool` | `false` | When `true`, simulates execution without touching disk. |
+| `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter. |
+| `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter. |
 
-*Returns `true` if the file was written, or `false` if skipped because it already existed.*
+*Returns `true` if the file was written (or simulated), or `false` if skipped because it already existed.*
 
 ---
 
@@ -296,21 +410,31 @@ public function scaffoldTree(
     string $targetDir,
     array $tokens,
     ?string $overrideDir = null,
+    OverrideStrategy $strategy = OverrideStrategy::Overlay,
     string $stubExtension = StubEngine::DEFAULT_STUB_EXTENSION,
+    bool $force = false,
+    bool $dryRun = false,
+    ?string $openDelimiter = null,
+    ?string $closeDelimiter = null,
 ): ScaffoldResult
 ```
 
-Scaffolds a complete directory tree from stubs with dual-axis token replacements and host override resolution.
+Scaffolds a complete directory tree from stubs with configurable strategy (`Overlay` vs `Replace`), dual-axis token replacements, and safe overwrite controls.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `$sourceDir` | `string` | *(required)* | Path to the default fallback stubs directory. |
 | `$targetDir` | `string` | *(required)* | Target directory where rendered files will be generated. |
 | `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
-| `$overrideDir` | `?string` | `null` | Optional host override directory. If present on disk, it takes precedence. |
+| `$overrideDir` | `?string` | `null` | Optional host override directory. |
+| `$strategy` | `OverrideStrategy` | `OverrideStrategy::Overlay` | Override strategy (`Overlay` for cascading merge, `Replace` for total substitution). |
 | `$stubExtension` | `string` | `StubEngine::DEFAULT_STUB_EXTENSION` (`'.stub'`) | Extension stripped from output filenames. Pass `''` to preserve extensions. |
+| `$force` | `bool` | `false` | When `false`, skips existing files. When `true`, overwrites them. |
+| `$dryRun` | `bool` | `false` | When `true`, simulates execution without touching disk. |
+| `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter. |
+| `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter. |
 
-*Throws `InvalidArgumentException` if neither the override directory nor the source directory exists.*
+*Throws `InvalidArgumentException` if the source directory does not exist.*
 
 ---
 
