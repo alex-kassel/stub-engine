@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AlexKassel\StubEngine\Services;
 
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
-use Illuminate\Support\Facades\File;
+use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -13,6 +13,10 @@ use SplFileInfo;
 
 class StubEngine
 {
+    public function __construct(
+        protected Filesystem $files = new Filesystem,
+    ) {}
+
     /**
      * Scaffold a complete directory tree from stubs with token replacements.
      *
@@ -31,14 +35,14 @@ class StubEngine
         ?string $overrideDir = null,
         string $stubExtension = '.stub',
     ): ScaffoldResult {
-        $isOverride = $overrideDir !== null && File::isDirectory($overrideDir);
+        $isOverride = $overrideDir !== null && $this->files->isDirectory($overrideDir);
         $effectiveSource = $isOverride ? $overrideDir : $sourceDir;
 
-        if (! File::isDirectory($effectiveSource)) {
+        if (! $this->files->isDirectory($effectiveSource)) {
             throw new InvalidArgumentException("Stubs source directory not found: [{$effectiveSource}].");
         }
 
-        File::ensureDirectoryExists($targetDir);
+        $this->files->ensureDirectoryExists($targetDir);
 
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($effectiveSource, RecursiveDirectoryIterator::SKIP_DOTS),
@@ -63,12 +67,12 @@ class StubEngine
             $destPath = $targetDir.DIRECTORY_SEPARATOR.str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $targetRelPath);
 
             if ($item->isDir()) {
-                File::ensureDirectoryExists($destPath);
+                $this->files->ensureDirectoryExists($destPath);
             } else {
-                File::ensureDirectoryExists(dirname($destPath));
-                $content = File::get($item->getPathname());
+                $this->files->ensureDirectoryExists(dirname($destPath));
+                $content = $this->files->get($item->getPathname());
                 $rendered = str_replace($tokenKeys, $tokenValues, $content);
-                File::put($destPath, $rendered);
+                $this->files->put($destPath, $rendered);
                 $renderedFiles[] = $targetRelPath;
             }
         }

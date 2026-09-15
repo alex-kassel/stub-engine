@@ -1,11 +1,22 @@
 {
     "name": "alex-kassel/stub-engine",
-    "description": "Hierarchical template and stub scaffolding engine for PHP and Laravel packages",
+    "description": "Hierarchical template and stub scaffolding engine with token interpolation and host overrides for PHP and Laravel",
+    "keywords": [
+        "laravel",
+        "stubs",
+        "templates",
+        "scaffolding",
+        "code-generation",
+        "generator",
+        "package-development"
+    ],
+    "homepage": "https://github.com/alex-kassel/stub-engine",
     "type": "library",
     "license": "MIT",
     "authors": [
         {
-            "name": "Alex Kassel"
+            "name": "Alex Kassel",
+            "homepage": "https://github.com/alex-kassel"
         }
     ],
     "require": {
@@ -18,11 +29,19 @@
             "AlexKassel\\StubEngine\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "AlexKassel\\StubEngine\\Tests\\": "tests/"
+        }
+    },
     "extra": {
         "laravel": {
             "providers": [
                 "AlexKassel\\StubEngine\\StubEngineServiceProvider"
-            ]
+            ],
+            "aliases": {
+                "StubEngine": "AlexKassel\\StubEngine\\Facades\\StubEngine"
+            }
         }
     }
 }
