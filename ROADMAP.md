@@ -9,6 +9,9 @@ This document outlines architectural proposals and future feature specifications
 * [RFC-001: Smart Code Injection & Anchor Hooking](#rfc-001-smart-code-injection--anchor-hooking)
 * [RFC-002: Lightweight Conditional & Loop Directives](#rfc-002-lightweight-conditional--loop-directives)
 * [RFC-003: Interactive Conflict Resolution & Unified Diffing](#rfc-003-interactive-conflict-resolution--unified-diffing)
+* [RFC-004: Post-Processor & Code Cleanup Pipeline](#rfc-004-post-processor--code-cleanup-pipeline)
+* [RFC-005: Stub Schema & Interactive Token Prompter](#rfc-005-stub-schema--interactive-token-prompter)
+* [RFC-006: First-Class Testing Kit & Snapshot Assertions](#rfc-006-first-class-testing-kit--snapshot-assertions)
 
 ---
 
@@ -218,3 +221,209 @@ Choose action [y/n/d/b] (default: n):
 2. When content diverges and a conflict handler is provided, the closure is invoked with path, existing content, and new content.
 3. `ConflictAction::Backup` creates a `.bak` backup file of the existing file and writes the new file.
 4. Unified diff generator outputs standard `+` and `-` diff chunks accurately.
+
+---
+
+## RFC-004: Post-Processor & Code Cleanup Pipeline
+
+*Inspiration: Angular Schematics (Rule transform pipes), Plop.js (transform actions), and Laravel Pint.*
+
+### 1. Motivation & Problem Statement
+
+Generated code frequently suffers from formatting degradation:
+* Extraneous blank lines left behind after stripped template comments or conditional blocks.
+* Unsorted or duplicated `use` import statements.
+* Inconsistent indentation or style violations that fail project linters (e.g. PSR-12, Laravel Pint).
+* JSON, YAML, or XML files rendered with messy indentation.
+
+Currently, developers must manually run linter commands after executing scaffolding tools, or accept unformatted artifacts in source control.
+
+### 2. Proposed Public API & DX Example
+
+```php
+use AlexKassel\StubEngine\Facades\StubEngine;
+
+// 1. Register custom in-memory string transformers per file pattern
+StubEngine::addPostProcessor('*.php', function (string $content, string $relativePath): string {
+    return ImportSorter::sort($content);
+});
+
+// 2. Execute scaffolding with automated Laravel Pint formatting
+$result = StubEngine::scaffoldTree(
+    sourceDir: base_path('stubs/module'),
+    targetDir: app_path('Modules/Billing'),
+    tokens: ['name' => 'Billing'],
+    formatWithPint: true, // Automatically formats freshly generated files via Laravel Pint
+);
+```
+
+### 3. Architecture & Impacted Components
+
+* **New Service:** `AlexKassel\StubEngine\Services\PostProcessorPipeline` (maintains an ordered chain of transformers matched by file pattern).
+* **New Service:** `AlexKassel\StubEngine\Services\PintFormatter` (safely invokes `vendor/bin/pint` on `$result->createdFiles` using `Symfony\Component\Process\Process`).
+* **DTO Updates:** `ScaffoldResult` tracks `formattedFiles`.
+
+### 4. Implementation Boundaries & Non-Goals
+
+* **In Scope:**
+  * In-memory string post-processors registered by glob pattern (e.g. `*.php`, `*.json`).
+  * Seamless opt-in formatting via Laravel Pint for generated PHP files.
+  * Pipeline error containment (formatting issues report warnings without aborting scaffolding).
+* **Non-Goals (Out of Scope):**
+  * Full AST parsing or automatic syntax refactoring.
+  * Hard dependency on external binaries (Pint is invoked only if present in vendor or system).
+
+### 5. Acceptance Criteria & Test Scenarios
+
+1. Registered post-processors transform matching files before disk write.
+2. Non-matching files bypass post-processors untouched.
+3. Post-processors receive relative path and rendered content.
+4. Pint formatting correctly applies to created files when `formatWithPint: true`.
+
+---
+
+## RFC-005: Stub Schema & Interactive Token Prompter
+
+*Inspiration: Mason CLI (`brick.yaml` manifests in Dart/Flutter) and Cookiecutter template schemas.*
+
+### 1. Motivation & Problem Statement
+
+Template directories often have implicit token expectations. Consumers, developers, and AI agents have no standardized way to discover:
+* Which placeholder tokens a template requires.
+* Which tokens have default fallbacks or computed expressions (e.g. `table = {{ name|snake|plural }}`).
+* How to validate user inputs before generating files.
+
+Consequently, CLI command authors repeatedly write boilerplate Symfony Console prompts (`$this->ask()`, `$this->confirm()`) to collect token values.
+
+### 2. Proposed Public API & DX Example
+
+Template manifest file located at `stubs/stub.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "Domain Module",
+  "description": "Standard domain module skeleton with action, model, and tests",
+  "tokens": {
+    "module": {
+      "type": "string",
+      "prompt": "What is the domain module name?",
+      "example": "Billing",
+      "required": true
+    },
+    "table": {
+      "type": "string",
+      "prompt": "Database table name?",
+      "default": "{{ module|snake|plural }}"
+    },
+    "with_policy": {
+      "type": "boolean",
+      "prompt": "Generate authorization policy?",
+      "default": true
+    }
+  }
+}
+```
+
+CLI Command orchestration:
+
+```php
+use AlexKassel\StubEngine\Facades\StubEngine;
+
+// Automatically inspects schema, prompts user in console for missing tokens, and scaffolds
+$result = StubEngine::promptAndScaffold(
+    sourceDir: base_path('stubs/domain-module'),
+    targetDir: app_path('Modules'),
+    command: $this, // Illuminate\Console\Command
+);
+```
+
+### 3. Architecture & Impacted Components
+
+* **New Service:** `AlexKassel\StubEngine\Services\SchemaParser` (loads and validates `stub.schema.json` or `stub.schema.yaml`).
+* **New Service:** `AlexKassel\StubEngine\Services\InteractivePrompter` (orchestrates console questions using Laravel Prompts / Symfony Console).
+* **Token Dependency Resolver:** Evaluates default token expressions dependent on previously entered tokens.
+
+### 4. Implementation Boundaries & Non-Goals
+
+* **In Scope:**
+  * Standard JSON/YAML schema discovery in template source directories.
+  * Token type validation (string, boolean, integer, choice).
+  * Auto-computed token defaults based on prior inputs.
+  * Seamless interactive console prompting via Laravel Prompts.
+* **Non-Goals (Out of Scope):**
+  * Dynamic script execution or remote schema fetching.
+
+### 5. Acceptance Criteria & Test Scenarios
+
+1. `SchemaParser` correctly extracts required and optional tokens from `stub.schema.json`.
+2. Computed default values interpolate earlier tokens (e.g. `table` computes from `module`).
+3. Non-interactive CLI runs validate input tokens against schema requirements and fail fast if required tokens are absent.
+4. Interactive prompts only ask for tokens not already supplied via CLI options.
+
+---
+
+## RFC-006: First-Class Testing Kit & Snapshot Assertions
+
+*Inspiration: Jest Snapshot Testing and `yeoman-test` filesystem assertions.*
+
+### 1. Motivation & Problem Statement
+
+Testing code generators and scaffolding packages is notoriously tedious. Developers must:
+1. Manually set up and tear down temporary directories.
+2. Assert individual files with dozens of `$this->assertFileExists()` lines.
+3. Compare file contents with brittle, repetitive string comparisons.
+
+As a result, generator test suites are either poorly maintained or omitted entirely.
+
+### 2. Proposed Public API & DX Example
+
+```php
+namespace Tests\Feature;
+
+use AlexKassel\StubEngine\Testing\InteractsWithStubs;
+use Tests\TestCase;
+
+class MakeModuleCommandTest extends TestCase
+{
+    use InteractsWithStubs;
+
+    public function test_it_scaffolds_expected_module_structure(): void
+    {
+        $result = $this->stubEngine()->scaffoldTree(
+            sourceDir: base_path('stubs/module'),
+            targetDir: $this->sandboxPath('Modules/Billing'),
+            tokens: ['name' => 'Billing'],
+        );
+
+        // Fluent filesystem & snapshot assertions
+        $this->assertScaffold($result)
+            ->hasCreated('src/BillingService.php')
+            ->fileContains('src/BillingService.php', 'class BillingService')
+            ->hasSkippedNothing()
+            ->matchesDirectorySnapshot('module_billing_default');
+    }
+}
+```
+
+### 3. Architecture & Impacted Components
+
+* **New Trait:** `AlexKassel\StubEngine\Testing\InteractsWithStubs` (sandboxed directory lifecycle and mock setup).
+* **New Assertion Class:** `AlexKassel\StubEngine\Testing\ScaffoldAssertion` (fluent chaining of tree assertions).
+* **New Service:** `AlexKassel\StubEngine\Testing\SnapshotManager` (persists and compares directory fixtures in `tests/__snapshots__/`).
+
+### 4. Implementation Boundaries & Non-Goals
+
+* **In Scope:**
+  * Automatic sandboxed temp directory provisioning and teardown.
+  * Fluent assertions for `ScaffoldResult` (`hasCreated`, `hasOverwritten`, `hasSkipped`, `fileContains`).
+  * Text-based directory tree snapshot matching with update flags (`UPDATE_SNAPSHOTS=true`).
+* **Non-Goals (Out of Scope):**
+  * Binary file visual diffing.
+
+### 5. Acceptance Criteria & Test Scenarios
+
+1. `assertScaffold()` accurately passes when created files match expectations and fails with descriptive messages when files are missing.
+2. `matchesDirectorySnapshot()` stores snapshot fixture on first run and validates exact textual identity on subsequent runs.
+3. Sandbox directories are automatically deleted upon test completion without leaving stray artifacts.
+

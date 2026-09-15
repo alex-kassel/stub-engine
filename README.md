@@ -13,6 +13,7 @@
   <a href="#usage--recipes">Usage & Recipes</a> •
   <a href="#api-reference">API Reference</a> •
   <a href="#testing">Testing</a> •
+  <a href="USE-CASES.md">Use Cases</a> •
   <a href="ROADMAP.md">Roadmap</a> •
   <a href="LICENSE.md">License</a>
 </p>
