@@ -1,0 +1,28 @@
+{
+    "name": "alex-kassel/stub-engine",
+    "description": "Hierarchical template and stub scaffolding engine for PHP and Laravel packages",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Alex Kassel"
+        }
+    ],
+    "require": {
+        "php": "^8.2|^8.3|^8.4",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "illuminate/filesystem": "^11.0|^12.0|^13.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "AlexKassel\\StubEngine\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "AlexKassel\\StubEngine\\StubEngineServiceProvider"
+            ]
+        }
+    }
+}
