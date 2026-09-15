@@ -27,25 +27,29 @@
 
 ## Why This Exists
 
-Package generators, module creators, and CLI scaffolding tools repeatedly reinvent the exact same low-level filesystem logic:
-1. Navigating nested directory structures.
-2. Replacing placeholder tokens in file contents.
-3. Replacing placeholder tokens in **directory and file names** (e.g. `src/{{ ServiceProvider }}.php.stub`).
-4. Stripping template extensions (`.stub`).
-5. Cascading and resolving consumer host overrides when templates are published.
+Generators, module builders, manifest installers, and CLI scaffolding tools repeatedly reinvent low-level filesystem operations:
+1. Interpolating token placeholders in file contents.
+2. Interpolating token placeholders in **directory and file names** (e.g. `src/{{ ClassName }}.php.stub`).
+3. Stripping template extensions (`.stub`).
+4. Enabling consumer applications to override default stubs without modifying vendor packages.
+5. Handling single-file stubs (e.g. compiling a standalone script or configuration) alongside multi-file directory trees.
 
-**StubEngine** extracts this entire lifecycle into a standalone, lightweight, zero-bloat service. Whether you build microservice generators, DDD module makers, or package development toolkits, **StubEngine** gives you a standardized, battle-tested scaffolding engine in a single declarative method call.
+**StubEngine** extracts this entire lifecycle into a lightweight, zero-bloat service. Whether you need to render an in-memory string, scaffold an individual file with host overrides, or generate an entire directory hierarchy, **StubEngine** provides a clean, unified API.
 
 ---
 
 ## Key Features
 
-* **Tree-Preserving Scaffolding:** Mirrors full directory structures from your stubs into destination paths with zero flattening.
-* **Dual-Axis Token Interpolation:** Replaces tokens in both file contents AND file/directory paths simultaneously.
-* **Seamless Host Overrides:** Automatically checks for published host overrides first (e.g. `stubs/my-generator/`) and falls back to package defaults.
-* **Extension Stripping:** Automatically removes `.stub` extensions (or any custom extension) during generation.
-* **Pure Decoupled Design:** Built directly on `Illuminate\Filesystem\Filesystem`. Usable in Laravel service providers, console commands, standalone CLI tools, or background jobs.
-* **Comprehensive Results:** Returns a typed `ScaffoldResult` DTO with rendered file paths, total counts, and override detection.
+* **Single-File Compilation & Scaffolding:**
+  * `renderFile()`: Compile an individual stub into a string with token replacements and host override support.
+  * `scaffoldFile()`: Write a compiled stub directly to a destination with safe skip/overwrite controls.
+* **Tree-Preserving Scaffolding:**
+  * `scaffoldTree()`: Mirror nested directory hierarchies from templates into target directories without structure loss.
+* **Dual-Axis Token Interpolation:** Replace tokens in both file contents AND file/directory pathnames simultaneously.
+* **Seamless Host Overrides:** Automatically checks for host project overrides (e.g. in `stubs/`) before falling back to package defaults.
+* **Configurable Extension Stripping:** Automatically removes `.stub` (default: `StubEngine::DEFAULT_STUB_EXTENSION`) or any custom extension from output filenames.
+* **Pure Decoupled Design:** Built on `Illuminate\Filesystem\Filesystem`. Usable across console commands, service providers, background jobs, or standalone CLI tools.
+* **Typed DTOs:** Returns a typed `ScaffoldResult` object with rendered relative paths, file counts, and override detection.
 
 ---
 
@@ -72,6 +76,43 @@ If you are using Laravel, the service provider and `StubEngine` facade are autom
 
 ## Quickstart
 
+### 1. Scaffold a Single File (e.g. CLI Runner or Config)
+
+```php
+use AlexKassel\StubEngine\Facades\StubEngine;
+
+$created = StubEngine::scaffoldFile(
+    sourceFile: __DIR__ . '/../stubs/runner.stub',
+    targetFile: base_path('bin/my-tool'),
+    tokens: [
+        '{{ runnerName }}' => 'my-tool',
+        '{{ manifestPath }}' => 'tool.json',
+    ],
+    overrideFile: base_path('stubs/runner.stub'), // Optional host override
+    force: false, // Skip if target file already exists
+);
+
+if ($created) {
+    echo "Standalone runner created at bin/my-tool!";
+}
+```
+
+### 2. Render In-Memory Content from a Stub
+
+```php
+use AlexKassel\StubEngine\Facades\StubEngine;
+
+$compiled = StubEngine::renderFile(
+    sourceFile: __DIR__ . '/../stubs/config.stub',
+    tokens: [
+        '{{ appName }}' => 'My Application',
+    ],
+    overrideFile: base_path('stubs/config.stub'),
+);
+```
+
+### 3. Scaffold a Complete Directory Tree
+
 Organize your stubs directory keeping the natural folder hierarchy:
 
 ```
@@ -83,7 +124,7 @@ my-package/stubs/
     └── {{ ClassName }}Test.php.stub
 ```
 
-Execute scaffolding in your command or service:
+Execute scaffolding:
 
 ```php
 use AlexKassel\StubEngine\Facades\StubEngine;
@@ -148,9 +189,9 @@ class MakeModuleCommand extends Command
 }
 ```
 
-### 2. Enabling Stubs Publishing in Service Providers
+### 2. Allowing Host Stub Overrides via `vendor:publish`
 
-To allow host applications to customize your package's stubs, register a publishable tag:
+To allow host applications to customize your package's stubs, register publishable assets in your service provider:
 
 ```php
 namespace Acme\Generator;
@@ -174,13 +215,16 @@ When users run `php artisan vendor:publish --tag=module-stubs`, they can modify 
 
 ### 3. Inspecting Scaffold Results
 
-The returned `ScaffoldResult` object provides detailed metadata for diagnostics and logging:
+The `ScaffoldResult` object returned by `scaffoldTree()` provides structured metadata:
 
 ```php
 $result = $engine->scaffoldTree(...);
 
 // Full path of the template directory utilized
 $sourceUsed = $result->sourceDir;
+
+// Target directory where files were scaffolded
+$targetDir = $result->targetDir;
 
 // True if host overrides were used; false if package defaults were used
 $isCustomized = $result->isOverride;
@@ -196,6 +240,54 @@ $total = $result->fileCount;
 
 ## API Reference
 
+### `StubEngine::renderFile`
+
+```php
+public function renderFile(
+    string $sourceFile,
+    array $tokens,
+    ?string $overrideFile = null,
+): string
+```
+
+Renders a single stub file into a string with token replacements.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `$sourceFile` | `string` | *(required)* | Path to the default fallback stub file. |
+| `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
+| `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
+
+*Throws `InvalidArgumentException` if neither the override file nor the source file exists.*
+
+---
+
+### `StubEngine::scaffoldFile`
+
+```php
+public function scaffoldFile(
+    string $sourceFile,
+    string $targetFile,
+    array $tokens,
+    ?string $overrideFile = null,
+    bool $force = false,
+): bool
+```
+
+Scaffolds a single stub file to a target destination with token replacements.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `$sourceFile` | `string` | *(required)* | Path to the default fallback stub file. |
+| `$targetFile` | `string` | *(required)* | Destination path for the rendered file. |
+| `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
+| `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
+| `$force` | `bool` | `false` | When `false`, skips existing files. When `true`, overwrites them. |
+
+*Returns `true` if the file was written, or `false` if skipped because it already existed.*
+
+---
+
 ### `StubEngine::scaffoldTree`
 
 ```php
@@ -204,17 +296,21 @@ public function scaffoldTree(
     string $targetDir,
     array $tokens,
     ?string $overrideDir = null,
-    string $stubExtension = '.stub',
+    string $stubExtension = StubEngine::DEFAULT_STUB_EXTENSION,
 ): ScaffoldResult
 ```
+
+Scaffolds a complete directory tree from stubs with dual-axis token replacements and host override resolution.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `$sourceDir` | `string` | *(required)* | Path to the default fallback stubs directory. |
 | `$targetDir` | `string` | *(required)* | Target directory where rendered files will be generated. |
 | `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
-| `$overrideDir` | `?string` | `null` | Optional host override directory. If it exists on disk, it takes full precedence. |
-| `$stubExtension` | `string` | `'.stub'` | Extension stripped from output filenames. Set to `''` to keep original filenames. |
+| `$overrideDir` | `?string` | `null` | Optional host override directory. If present on disk, it takes precedence. |
+| `$stubExtension` | `string` | `StubEngine::DEFAULT_STUB_EXTENSION` (`'.stub'`) | Extension stripped from output filenames. Pass `''` to preserve extensions. |
+
+*Throws `InvalidArgumentException` if neither the override directory nor the source directory exists.*
 
 ---
 

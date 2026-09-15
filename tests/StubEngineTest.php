@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace AlexKassel\StubEngine\Tests;
 
 use AlexKassel\StubEngine\Services\StubEngine;
+use AlexKassel\StubEngine\StubEngineServiceProvider;
+use Illuminate\Container\Container;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Facade;
 use InvalidArgumentException;
 
 class StubEngineTest extends TestCase
@@ -127,5 +130,23 @@ class StubEngineTest extends TestCase
             targetDir: "{$this->tempDir}/out",
             tokens: [],
         );
+    }
+
+    public function test_facade_and_container_binding(): void
+    {
+        $app = new Container;
+        Facade::setFacadeApplication($app);
+
+        $provider = new StubEngineServiceProvider($app);
+        $provider->register();
+
+        $stub = "{$this->tempDir}/facade.stub";
+        $this->files->put($stub, 'Hello {{ name }}');
+
+        $content = \AlexKassel\StubEngine\Facades\StubEngine::renderFile($stub, ['{{ name }}' => 'Laravel']);
+        $this->assertSame('Hello Laravel', $content);
+
+        $instance = $app->make(StubEngine::class);
+        $this->assertInstanceOf(StubEngine::class, $instance);
     }
 }

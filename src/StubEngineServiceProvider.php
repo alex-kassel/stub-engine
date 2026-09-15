@@ -14,9 +14,7 @@ class StubEngineServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(StubEngine::class, function () {
-            return new StubEngine;
-        });
+        $this->app->singleton(StubEngine::class);
     }
 
     /**
