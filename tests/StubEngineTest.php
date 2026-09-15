@@ -82,6 +82,41 @@ class StubEngineTest extends TestCase
         $this->assertStringEqualsFile("{$targetDir}/file.txt", 'custom: alex');
     }
 
+    public function test_render_file_and_scaffold_file_with_host_override(): void
+    {
+        $defaultStub = "{$this->tempDir}/default.stub";
+        $overrideStub = "{$this->tempDir}/override.stub";
+        $targetFile = "{$this->tempDir}/target.txt";
+
+        $this->files->put($defaultStub, 'Hello {{ name }}, default path: {{ path }}');
+        $this->files->put($overrideStub, 'Hello {{ name }}, custom path: {{ path }}');
+
+        $engine = new StubEngine($this->files);
+
+        // 1. Render default without override
+        $content = $engine->renderFile($defaultStub, ['{{ name }}' => 'Alex', '{{ path }}' => '/foo']);
+        $this->assertSame('Hello Alex, default path: /foo', $content);
+
+        // 2. Render with host override
+        $contentOverride = $engine->renderFile($defaultStub, ['{{ name }}' => 'Alex', '{{ path }}' => '/foo'], $overrideStub);
+        $this->assertSame('Hello Alex, custom path: /foo', $contentOverride);
+
+        // 3. Scaffold file to disk
+        $created = $engine->scaffoldFile($defaultStub, $targetFile, ['{{ name }}' => 'World', '{{ path }}' => '/bar']);
+        $this->assertTrue($created);
+        $this->assertFileExists($targetFile);
+        $this->assertStringEqualsFile($targetFile, 'Hello World, default path: /bar');
+
+        // 4. Skip without force
+        $skipped = $engine->scaffoldFile($defaultStub, $targetFile, ['{{ name }}' => 'World', '{{ path }}' => '/bar'], force: false);
+        $this->assertFalse($skipped);
+
+        // 5. Overwrite with force
+        $overwritten = $engine->scaffoldFile($defaultStub, $targetFile, ['{{ name }}' => 'Universe', '{{ path }}' => '/baz'], force: true);
+        $this->assertTrue($overwritten);
+        $this->assertStringEqualsFile($targetFile, 'Hello Universe, default path: /baz');
+    }
+
     public function test_throws_exception_when_source_directory_missing(): void
     {
         $this->expectException(InvalidArgumentException::class);
