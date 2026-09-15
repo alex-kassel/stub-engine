@@ -5,6 +5,24 @@ All notable changes to `alex-kassel/stub-engine` will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.0] - 2026-09-15
+
+### Added
+- Pure constructor dependency injection for `StubEngine` (`Filesystem $files`, `array $config = []`), enabling 100% standalone PHP usage.
+- Custom token modifier registry: `registerModifier(string $name, callable $callback)` adhering to the Open-Closed Principle.
+- Single-pass pre-compiled token replacement via `interpolateWithMap(string $content, array $compiledTokens)`.
+- Path traversal security validation preventing relative escape from target scaffolding directories.
+- Unresolved token detection with `findUnresolvedTokens()` and optional `strict: true` enforcement in `renderFile`, `scaffoldFile`, and `scaffoldTree`.
+- Raw non-stub asset copying (safely copies binary and non-template files without string replacement).
+- Automatic filtering for system and VCS files (`.DS_Store`, `Thumbs.db`, `.gitkeep`).
+- `ScaffoldResult` tracking for `rawCopiedFiles`, `unresolvedTokens`, and helpers `hasRawCopied()` / `hasUnresolvedTokens()`.
+- `.gitattributes` to exclude tests and CI configs from Packagist distribution archives.
+- GitHub Actions CI workflow matrix covering PHP 8.2-8.4, stability, and OS (`ubuntu-latest`, `windows-latest`).
+
+### Changed
+- Eliminated internal `getConfig()` and global `Container::getInstance()` coupling in favor of container-provided DI via `StubEngineServiceProvider`.
+- Optimized `scaffoldTree()` performance from $O(N \times M)$ token recalculation to upfront single-pass dictionary compilation.
+
 ## [v0.0.3] - 2026-09-15
 
 ### Added

@@ -44,6 +44,10 @@ Generators, module builders, manifest installers, and CLI scaffolding tools repe
 * **Dual Override Strategies (`Overlay` vs `Replace`):**
   * **`OverrideStrategy::Overlay` (Default):** Cascading file-by-file overlay. If a host project customizes 1 file out of 10, the other 9 package defaults are preserved.
   * **`OverrideStrategy::Replace`:** Complete directory substitution ("all-or-nothing"). Perfect for document bundles, template suites, or thematic assets where a custom template completely replaces the default directory layout.
+* **Extensible Token Modifiers (Open-Closed Principle):**
+  * Built-in string casing: `studly`, `camel`, `kebab`, `snake`, `lower`, `upper`, `title`, `plural`, and `singular`.
+  * Register custom modifiers via `StubEngine::registerModifier('custom', fn ($val) => ...)`.
+* **High-Performance Single-Pass Compilation:** Token dictionaries are pre-compiled and sorted once upfront per tree operation, eliminating $O(N \times M)$ overhead.
 * **Configurable Delimiters & Zero-Trust Fallbacks:**
   * Globally customize placeholder delimiters (e.g. `<% %>` or `[[ ]]`) via `config/stub-engine.php` to eliminate syntax collisions with Blade (`{{ $var }}`), Vue, Jinja, or bash.
   * Override delimiters on a per-call basis at runtime.
@@ -52,12 +56,12 @@ Generators, module builders, manifest installers, and CLI scaffolding tools repe
   * Define application-wide global tokens (e.g. `company_name`, `year`, `author`) in `config/stub-engine.php`.
   * Runtime tokens seamlessly merge and take precedence over global tokens.
 * **Dual-Axis Token Interpolation:** Replace tokens in both file contents AND file/directory pathnames simultaneously (e.g. `src/<% Module|studly %>.php.stub`).
-* **Built-in Token Modifiers & Collision Safety:**
-  * Automatic string casing: `studly`, `camel`, `kebab`, `snake`, `lower`, `upper`, `title`, `plural`, and `singular`.
-  * Substring collision prevention: longest token keys are replaced first (`{{ item_id }}` before `{{ item }}`).
+* **Security & Path Traversal Protection:** Path normalization and validation guarantee that interpolated paths cannot escape the target destination directory.
+* **Binary & Raw Asset Protection:** Files without `.stub` extension are safely copied without string interpolation, and system junk files (`.DS_Store`, `Thumbs.db`, `.gitkeep`) are automatically filtered out.
+* **Strict Diagnostics Mode:** Detect unreplaced placeholders in generated templates via `findUnresolvedTokens()`, or pass `strict: true` to fail fast before deploying broken code.
 * **Safe Overwrite & Dry-Run Modes:** Prevent accidental file overwrites (`force: false`) and simulate execution non-destructively for CLI commands (`dryRun: true`).
-* **Decoupled Architecture:** Built on `Illuminate\Filesystem\Filesystem`. Usable across console commands, service providers, background jobs, or standalone CLI tools.
-* **Rich, Countable DTOs:** Returns a typed `ScaffoldResult` object implementing `\Countable` with granular file status arrays (`createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`) and helper inspection methods.
+* **Decoupled Architecture:** Pure constructor DI with `Illuminate\Filesystem\Filesystem` and array config. Usable across Laravel console commands, service providers, background jobs, or standalone pure PHP CLI tools.
+* **Rich, Countable DTOs:** Returns a typed `ScaffoldResult` object implementing `\Countable` with granular file status arrays (`createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`, `rawCopiedFiles`, `unresolvedTokens`) and expressive inspection methods.
 
 ---
 
@@ -304,7 +308,42 @@ In any stub file or file path, you can use:
 * `{{ entity|plural }}` → `user profiles`
 * `{{ entity|singular }}` → `user profile`
 
-### 6. Inspecting Scaffold Results & Dry-Run Mode
+#### Registering Custom Modifiers
+
+Extend the engine at runtime with custom domain modifiers:
+
+```php
+use AlexKassel\StubEngine\Facades\StubEngine;
+
+StubEngine::registerModifier('slug', fn (string $val): string => \Illuminate\Support\Str::slug($val));
+StubEngine::registerModifier('shout', fn (string $val): string => strtoupper($val) . '!!!');
+
+// In stubs: {{ title|slug }} or {{ alert|shout }}
+```
+
+### 6. Strict Mode & Unresolved Token Diagnostics
+
+Prevent broken PHP code caused by forgotten placeholder variables:
+
+```php
+// 1. Detect unresolved placeholders programmatically
+$unresolved = StubEngine::findUnresolvedTokens($content);
+// Returns: ['{{ missing_token }}', '{{ other|studly }}']
+
+// 2. Strict scaffolding (fails fast if any placeholder is missing)
+try {
+    StubEngine::scaffoldTree(
+        sourceDir: __DIR__ . '/../stubs',
+        targetDir: app_path('Modules/Billing'),
+        tokens: ['name' => 'Billing'],
+        strict: true, // Throws InvalidArgumentException on unresolved tokens
+    );
+} catch (\InvalidArgumentException $e) {
+    // Gracefully report missing inputs to CLI user
+}
+```
+
+### 7. Inspecting Scaffold Results & Dry-Run Mode
 
 The `ScaffoldResult` object implements `\Countable` and provides fine-grained visibility into file operations:
 
@@ -354,6 +393,7 @@ public function renderFile(
     ?string $overrideFile = null,
     ?string $openDelimiter = null,
     ?string $closeDelimiter = null,
+    bool $strict = false,
 ): string
 ```
 
@@ -366,6 +406,7 @@ Renders a single stub file into a string with token replacements.
 | `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
 | `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter (falls back to config or `{{`). |
 | `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter (falls back to config or `}}`). |
+| `$strict` | `bool` | `false` | When `true`, throws `InvalidArgumentException` if any placeholders remain unreplaced. |
 
 *Throws `InvalidArgumentException` if neither the override file nor the source file exists.*
 
@@ -383,6 +424,7 @@ public function scaffoldFile(
     bool $dryRun = false,
     ?string $openDelimiter = null,
     ?string $closeDelimiter = null,
+    bool $strict = false,
 ): bool
 ```
 
@@ -398,6 +440,7 @@ Scaffolds a single stub file to a target destination with token replacements.
 | `$dryRun` | `bool` | `false` | When `true`, simulates execution without touching disk. |
 | `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter. |
 | `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter. |
+| `$strict` | `bool` | `false` | When `true`, throws `InvalidArgumentException` on unresolved tokens. |
 
 *Returns `true` if the file was written (or simulated), or `false` if skipped because it already existed.*
 
@@ -417,10 +460,11 @@ public function scaffoldTree(
     bool $dryRun = false,
     ?string $openDelimiter = null,
     ?string $closeDelimiter = null,
+    bool $strict = false,
 ): ScaffoldResult
 ```
 
-Scaffolds a complete directory tree from stubs with configurable strategy (`Overlay` vs `Replace`), dual-axis token replacements, and safe overwrite controls.
+Scaffolds a complete directory tree from stubs with configurable strategy (`Overlay` vs `Replace`), dual-axis token replacements, safe overwrite controls, path traversal security, and raw non-stub asset protection.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -434,8 +478,33 @@ Scaffolds a complete directory tree from stubs with configurable strategy (`Over
 | `$dryRun` | `bool` | `false` | When `true`, simulates execution without touching disk. |
 | `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter. |
 | `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter. |
+| `$strict` | `bool` | `false` | When `true`, throws `InvalidArgumentException` if unresolved tokens are encountered. |
 
-*Throws `InvalidArgumentException` if the source directory does not exist.*
+*Throws `InvalidArgumentException` if the source directory does not exist or if path traversal is attempted.*
+
+---
+
+### `StubEngine::registerModifier`
+
+```php
+public function registerModifier(string $name, callable $callback): self
+```
+
+Registers a custom runtime token modifier function (e.g. `{{ var|name }}`).
+
+---
+
+### `StubEngine::findUnresolvedTokens`
+
+```php
+public function findUnresolvedTokens(
+    string $content,
+    ?string $openDelimiter = null,
+    ?string $closeDelimiter = null,
+): array
+```
+
+Scans a string and extracts all unresolved placeholder tokens.
 
 ---
 

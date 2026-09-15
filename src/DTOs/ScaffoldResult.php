@@ -23,6 +23,8 @@ final readonly class ScaffoldResult implements Countable
      * @param  array<int, string>  $overwrittenFiles  Relative paths of overwritten files
      * @param  array<int, string>  $skippedFiles  Relative paths of skipped files
      * @param  array<int, string>  $overrideFiles  Relative paths of files resolved from override directory
+     * @param  array<int, string>  $rawCopiedFiles  Relative paths of raw/binary files copied without interpolation
+     * @param  array<string, array<int, string>>  $unresolvedTokens  Map of relative file paths to any unreplaced token placeholders
      * @param  bool  $dryRun  Whether the operation was simulated without disk writes
      * @param  OverrideStrategy  $strategy  The override strategy used (Overlay or Replace)
      */
@@ -33,6 +35,8 @@ final readonly class ScaffoldResult implements Countable
         public array $overwrittenFiles = [],
         public array $skippedFiles = [],
         public array $overrideFiles = [],
+        public array $rawCopiedFiles = [],
+        public array $unresolvedTokens = [],
         public bool $dryRun = false,
         public OverrideStrategy $strategy = OverrideStrategy::Overlay,
     ) {
@@ -79,6 +83,22 @@ final readonly class ScaffoldResult implements Countable
     public function hasOverwritten(): bool
     {
         return $this->overwrittenFiles !== [];
+    }
+
+    /**
+     * Check if any files have unresolved token placeholders.
+     */
+    public function hasUnresolvedTokens(): bool
+    {
+        return $this->unresolvedTokens !== [];
+    }
+
+    /**
+     * Check if any raw/binary files were copied directly.
+     */
+    public function hasRawCopied(): bool
+    {
+        return $this->rawCopiedFiles !== [];
     }
 
     /**

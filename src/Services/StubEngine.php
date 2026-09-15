@@ -6,7 +6,6 @@ namespace AlexKassel\StubEngine\Services;
 
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
-use Illuminate\Container\Container;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -21,33 +20,110 @@ class StubEngine
 
     public const DEFAULT_MODIFIER_SEPARATOR = '|';
 
-    public const CONFIG_OPEN_DELIMITER_KEY = 'stub-engine.delimiters.open';
+    public const CONFIG_DELIMITERS_KEY = 'delimiters';
 
-    public const CONFIG_CLOSE_DELIMITER_KEY = 'stub-engine.delimiters.close';
+    public const CONFIG_OPEN_DELIMITER_KEY = 'delimiters.open';
 
-    public const CONFIG_GLOBAL_TOKENS_KEY = 'stub-engine.global_tokens';
+    public const CONFIG_CLOSE_DELIMITER_KEY = 'delimiters.close';
 
+    public const CONFIG_GLOBAL_TOKENS_KEY = 'global_tokens';
+
+    public const DEFAULT_IGNORED_FILES = [
+        '.DS_Store',
+        'Thumbs.db',
+        '.gitkeep',
+    ];
+
+    /** @var array<string, callable(string): string> */
+    protected array $customModifiers = [];
+
+    /**
+     * @param  Filesystem  $files  Filesystem repository
+     * @param  array<string, mixed>  $config  Stub engine configuration array
+     */
     public function __construct(
         protected Filesystem $files = new Filesystem,
+        protected array $config = [],
     ) {}
 
     /**
-     * Safely retrieve a configuration value without crashing if config is unbound.
+     * Register a custom token modifier callback.
+     *
+     * @param  callable(string): string  $callback
      */
-    protected function getConfig(string $key, mixed $default = null): mixed
+    public function registerModifier(string $name, callable $callback): self
     {
-        if (function_exists('app') && function_exists('config')) {
-            try {
-                $container = Container::getInstance();
-                if ($container !== null && $container->bound('config')) {
-                    return config($key, $default);
+        $this->customModifiers[$name] = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Validate that a destination path stays strictly within the target directory.
+     *
+     * @throws InvalidArgumentException
+     */
+    public function ensureWithinTargetDirectory(string $targetDir, string $destination): void
+    {
+        $normalizedTarget = rtrim(str_replace('\\', '/', $targetDir), '/');
+        $normalizedDest = str_replace('\\', '/', $destination);
+
+        $destParts = explode('/', $normalizedDest);
+        $canonicalDest = [];
+
+        foreach ($destParts as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part === '..') {
+                if (empty($canonicalDest)) {
+                    throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
                 }
-            } catch (\Throwable) {
-                return $default;
+                array_pop($canonicalDest);
+            } else {
+                $canonicalDest[] = $part;
             }
         }
 
-        return $default;
+        $targetParts = array_values(array_filter(explode('/', $normalizedTarget), fn (string $p): bool => $p !== ''));
+        $canonicalTarget = [];
+
+        foreach ($targetParts as $part) {
+            if ($part === '..') {
+                array_pop($canonicalTarget);
+            } elseif ($part !== '.') {
+                $canonicalTarget[] = $part;
+            }
+        }
+
+        $targetPrefix = (str_starts_with($normalizedTarget, '/') ? '/' : '').implode('/', $canonicalTarget);
+        $destResolved = (str_starts_with($normalizedDest, '/') ? '/' : '').implode('/', $canonicalDest);
+
+        if (! str_starts_with($destResolved, $targetPrefix.'/') && $destResolved !== $targetPrefix) {
+            throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
+        }
+    }
+
+    /**
+     * Scan content and return any unresolved token placeholders.
+     *
+     * @return array<int, string>
+     */
+    public function findUnresolvedTokens(
+        string $content,
+        ?string $openDelimiter = null,
+        ?string $closeDelimiter = null,
+    ): array {
+        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
+        $escapedOpen = preg_quote($open, '/');
+        $escapedClose = preg_quote($close, '/');
+
+        $pattern = '/'.$escapedOpen.'\s*([^'.$escapedClose.'\s]+(?:\s*\|\s*[^'.$escapedClose.'\s]+)?)\s*'.$escapedClose.'/';
+        if (preg_match_all($pattern, $content, $matches)) {
+            return array_values(array_unique($matches[0]));
+        }
+
+        return [];
     }
 
     /**
@@ -57,13 +133,26 @@ class StubEngine
      */
     public function resolveDelimiters(?string $open = null, ?string $close = null): array
     {
-        $configOpen = (string) $this->getConfig(self::CONFIG_OPEN_DELIMITER_KEY, '');
-        $configClose = (string) $this->getConfig(self::CONFIG_CLOSE_DELIMITER_KEY, '');
+        $configOpen = (string) (data_get($this->config, self::CONFIG_OPEN_DELIMITER_KEY)
+            ?: data_get($this->config, 'stub-engine.delimiters.open', ''));
+        $configClose = (string) (data_get($this->config, self::CONFIG_CLOSE_DELIMITER_KEY)
+            ?: data_get($this->config, 'stub-engine.delimiters.close', ''));
 
         $effectiveOpen = $open ?: ($configOpen ?: self::DEFAULT_TOKEN_OPEN_DELIMITER);
         $effectiveClose = $close ?: ($configClose ?: self::DEFAULT_TOKEN_CLOSE_DELIMITER);
 
         return [$effectiveOpen, $effectiveClose];
+    }
+
+    /**
+     * Interpolate token placeholders using a pre-compiled replacement dictionary.
+     *
+     * @param  string  $content  Template content or file/directory path
+     * @param  array<string, string>  $compiledTokens  Pre-compiled replacements sorted by key length
+     */
+    public function interpolateWithMap(string $content, array $compiledTokens): string
+    {
+        return str_replace(array_keys($compiledTokens), array_values($compiledTokens), $content);
     }
 
     /**
@@ -83,7 +172,7 @@ class StubEngine
     ): string {
         $resolved = $this->resolveTokens($tokens, $openDelimiter, $closeDelimiter);
 
-        return str_replace(array_keys($resolved), array_values($resolved), $content);
+        return $this->interpolateWithMap($content, $resolved);
     }
 
     /**
@@ -100,7 +189,8 @@ class StubEngine
     ): array {
         [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
 
-        $globalTokens = (array) $this->getConfig(self::CONFIG_GLOBAL_TOKENS_KEY, []);
+        $globalTokens = (array) (data_get($this->config, self::CONFIG_GLOBAL_TOKENS_KEY)
+            ?: data_get($this->config, 'stub-engine.global_tokens', []));
         $mergedTokens = array_merge($globalTokens, $tokens);
 
         $expanded = [];
@@ -134,6 +224,10 @@ class StubEngine
                 'singular' => Str::singular($strValue),
             ];
 
+            foreach ($this->customModifiers as $customModName => $customCallback) {
+                $modifiers[$customModName] = (string) $customCallback($strValue);
+            }
+
             foreach ($modifiers as $mod => $modVal) {
                 $expanded[$open.' '.$cleanKey.self::DEFAULT_MODIFIER_SEPARATOR.$mod.' '.$close] = $modVal;
                 $expanded[$open.$cleanKey.self::DEFAULT_MODIFIER_SEPARATOR.$mod.$close] = $modVal;
@@ -154,6 +248,7 @@ class StubEngine
      * @param  string|null  $overrideFile  Optional host override file (takes priority if it exists)
      * @param  string|null  $openDelimiter  Optional runtime open delimiter override
      * @param  string|null  $closeDelimiter  Optional runtime close delimiter override
+     * @param  bool  $strict  Whether to throw an exception if unresolved tokens remain
      *
      * @throws InvalidArgumentException
      */
@@ -163,6 +258,7 @@ class StubEngine
         ?string $overrideFile = null,
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
+        bool $strict = false,
     ): string {
         $isOverride = $overrideFile !== null && $this->files->isFile($overrideFile);
         $effectiveSource = $isOverride ? $overrideFile : $sourceFile;
@@ -172,8 +268,16 @@ class StubEngine
         }
 
         $content = (string) $this->files->get($effectiveSource);
+        $rendered = $this->interpolate($content, $tokens, $openDelimiter, $closeDelimiter);
 
-        return $this->interpolate($content, $tokens, $openDelimiter, $closeDelimiter);
+        if ($strict) {
+            $unresolved = $this->findUnresolvedTokens($rendered, $openDelimiter, $closeDelimiter);
+            if ($unresolved !== []) {
+                throw new InvalidArgumentException("Unresolved tokens in stub file [{$effectiveSource}]: ".implode(', ', $unresolved));
+            }
+        }
+
+        return $rendered;
     }
 
     /**
@@ -187,6 +291,7 @@ class StubEngine
      * @param  bool  $dryRun  Whether to simulate without writing to disk
      * @param  string|null  $openDelimiter  Optional runtime open delimiter override
      * @param  string|null  $closeDelimiter  Optional runtime close delimiter override
+     * @param  bool  $strict  Whether to throw an exception if unresolved tokens remain
      * @return bool True if created/overwritten, false if skipped because it already exists
      *
      * @throws InvalidArgumentException
@@ -200,12 +305,15 @@ class StubEngine
         bool $dryRun = false,
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
+        bool $strict = false,
     ): bool {
+        $this->ensureWithinTargetDirectory(dirname($targetFile), $targetFile);
+
         if ($this->files->exists($targetFile) && ! $force) {
             return false;
         }
 
-        $rendered = $this->renderFile($sourceFile, $tokens, $overrideFile, $openDelimiter, $closeDelimiter);
+        $rendered = $this->renderFile($sourceFile, $tokens, $overrideFile, $openDelimiter, $closeDelimiter, $strict);
 
         if (! $dryRun) {
             $this->files->ensureDirectoryExists(dirname($targetFile));
@@ -218,7 +326,7 @@ class StubEngine
     /**
      * Scaffold a complete directory tree from stubs with configurable strategy
      * (Overlay cascading merge vs Replace all-or-nothing), dual-axis token replacements,
-     * and safe overwrite/simulation controls.
+     * safe overwrite/simulation controls, and protection for raw non-stub assets.
      *
      * @param  string  $sourceDir  Default fallback stubs directory
      * @param  string  $targetDir  Target directory where files will be created
@@ -230,6 +338,7 @@ class StubEngine
      * @param  bool  $dryRun  Whether to simulate without writing to disk
      * @param  string|null  $openDelimiter  Optional runtime open delimiter override
      * @param  string|null  $closeDelimiter  Optional runtime close delimiter override
+     * @param  bool  $strict  Whether to throw an exception if unresolved tokens remain
      *
      * @throws InvalidArgumentException
      */
@@ -244,6 +353,7 @@ class StubEngine
         bool $dryRun = false,
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
+        bool $strict = false,
     ): ScaffoldResult {
         if (! $this->files->isDirectory($sourceDir)) {
             throw new InvalidArgumentException("Stubs source directory not found: [{$sourceDir}].");
@@ -255,8 +365,10 @@ class StubEngine
         $stubsMap = [];
 
         if ($hasOverrideDir && $strategy === OverrideStrategy::Replace) {
-            // Replace strategy: discard default source stubs completely and use only host override directory
             foreach ($this->files->allFiles($overrideDir) as $file) {
+                if (in_array($file->getFilename(), self::DEFAULT_IGNORED_FILES, true)) {
+                    continue;
+                }
                 $relPath = str_replace('\\', '/', $file->getRelativePathname());
                 $stubsMap[$relPath] = [
                     'sourcePath' => $file->getPathname(),
@@ -264,8 +376,10 @@ class StubEngine
                 ];
             }
         } else {
-            // Overlay strategy (default): base stubs first
             foreach ($this->files->allFiles($sourceDir) as $file) {
+                if (in_array($file->getFilename(), self::DEFAULT_IGNORED_FILES, true)) {
+                    continue;
+                }
                 $relPath = str_replace('\\', '/', $file->getRelativePathname());
                 $stubsMap[$relPath] = [
                     'sourcePath' => $file->getPathname(),
@@ -273,9 +387,11 @@ class StubEngine
                 ];
             }
 
-            // Layer host overrides on top (cascading file-by-file overlay)
             if ($hasOverrideDir) {
                 foreach ($this->files->allFiles($overrideDir) as $file) {
+                    if (in_array($file->getFilename(), self::DEFAULT_IGNORED_FILES, true)) {
+                        continue;
+                    }
                     $relPath = str_replace('\\', '/', $file->getRelativePathname());
                     $stubsMap[$relPath] = [
                         'sourcePath' => $file->getPathname(),
@@ -285,19 +401,28 @@ class StubEngine
             }
         }
 
+        // Pre-compile token replacement map ONCE for the entire tree
+        $compiledTokens = $this->resolveTokens($tokens, $openDelimiter, $closeDelimiter);
+
         $createdFiles = [];
         $overwrittenFiles = [];
         $skippedFiles = [];
         $overrideFiles = [];
+        $rawCopiedFiles = [];
+        $unresolvedTokensMap = [];
         $extLen = strlen($stubExtension);
 
         foreach ($stubsMap as $relPath => $stubInfo) {
-            $targetRelPath = $this->interpolate($relPath, $tokens, $openDelimiter, $closeDelimiter);
-            if ($stubExtension !== '' && str_ends_with($targetRelPath, $stubExtension)) {
+            $isStub = $stubExtension !== '' && str_ends_with($relPath, $stubExtension);
+            $targetRelPath = $this->interpolateWithMap($relPath, $compiledTokens);
+
+            if ($isStub) {
                 $targetRelPath = substr($targetRelPath, 0, -$extLen);
             }
 
             $destination = rtrim($targetDir, '/\\').'/'.$targetRelPath;
+            $this->ensureWithinTargetDirectory($targetDir, $destination);
+
             $exists = $this->files->exists($destination);
 
             if ($exists && ! $force) {
@@ -319,12 +444,30 @@ class StubEngine
                 $overrideFiles[] = $targetRelPath;
             }
 
-            $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
-            $renderedContent = $this->interpolate($rawContent, $tokens, $openDelimiter, $closeDelimiter);
+            if ($isStub) {
+                $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
+                $renderedContent = $this->interpolateWithMap($rawContent, $compiledTokens);
 
-            if (! $dryRun) {
-                $this->files->ensureDirectoryExists(dirname($destination));
-                $this->files->put($destination, $renderedContent);
+                $unresolved = $this->findUnresolvedTokens($renderedContent, $openDelimiter, $closeDelimiter);
+                if ($unresolved !== []) {
+                    $unresolvedTokensMap[$targetRelPath] = $unresolved;
+                    if ($strict) {
+                        throw new InvalidArgumentException("Unresolved tokens in [{$targetRelPath}]: ".implode(', ', $unresolved));
+                    }
+                }
+
+                if (! $dryRun) {
+                    $this->files->ensureDirectoryExists(dirname($destination));
+                    $this->files->put($destination, $renderedContent);
+                }
+            } else {
+                // Raw asset: copy directly without text replacement
+                $rawCopiedFiles[] = $targetRelPath;
+
+                if (! $dryRun) {
+                    $this->files->ensureDirectoryExists(dirname($destination));
+                    $this->files->copy($stubInfo['sourcePath'], $destination);
+                }
             }
         }
 
@@ -335,6 +478,8 @@ class StubEngine
             overwrittenFiles: $overwrittenFiles,
             skippedFiles: $skippedFiles,
             overrideFiles: $overrideFiles,
+            rawCopiedFiles: $rawCopiedFiles,
+            unresolvedTokens: $unresolvedTokensMap,
             dryRun: $dryRun,
             strategy: $strategy,
         );

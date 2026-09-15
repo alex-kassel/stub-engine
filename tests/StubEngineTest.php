@@ -338,8 +338,11 @@ class StubEngineTest extends TestCase
             ],
         ]);
         $app->instance('config', $config);
+        $provider = new StubEngineServiceProvider($app);
+        $provider->register();
 
-        $engine = new StubEngine($this->files);
+        /** @var StubEngine $engine */
+        $engine = $app->make(StubEngine::class);
 
         $template = 'Company: [[ company|kebab ]], Year: [[ year ]], User: [[ user|studly ]]';
         $rendered = $engine->interpolate($template, [
@@ -387,5 +390,139 @@ class StubEngineTest extends TestCase
 
         $instance = $app->make(StubEngine::class);
         $this->assertInstanceOf(StubEngine::class, $instance);
+    }
+
+    public function test_custom_token_modifier_registration(): void
+    {
+        $engine = new StubEngine($this->files);
+        $engine->registerModifier('reverse', fn (string $val): string => strrev($val));
+        $engine->registerModifier('slug', fn (string $val): string => strtolower(str_replace(' ', '-', $val)));
+
+        $template = 'Reversed: {{ name|reverse }}, Slug: {{ name|slug }}';
+        $rendered = $engine->interpolate($template, ['name' => 'John Doe']);
+
+        $this->assertSame('Reversed: eoD nhoJ, Slug: john-doe', $rendered);
+    }
+
+    public function test_interpolate_with_map(): void
+    {
+        $engine = new StubEngine($this->files);
+        $compiled = $engine->resolveTokens(['pkg' => 'stub-engine']);
+
+        $result = $engine->interpolateWithMap('Hello {{ pkg }} and {{ pkg|studly }}', $compiled);
+        $this->assertSame('Hello stub-engine and StubEngine', $result);
+    }
+
+    public function test_path_traversal_protection_in_scaffold_tree(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('attempts directory traversal outside target directory');
+
+        $stubsDir = "{$this->tempDir}/traversal_stubs";
+        $targetDir = "{$this->tempDir}/safe_output";
+
+        $this->files->ensureDirectoryExists("{$stubsDir}/{{ target }}");
+        $this->files->put("{$stubsDir}/{{ target }}/file.txt.stub", 'malicious');
+
+        $engine = new StubEngine($this->files);
+        $engine->scaffoldTree(
+            sourceDir: $stubsDir,
+            targetDir: $targetDir,
+            tokens: ['target' => '../../outside'],
+        );
+    }
+
+    public function test_raw_assets_copied_without_interpolation_and_ignored_files_skipped(): void
+    {
+        $stubsDir = "{$this->tempDir}/mixed_stubs";
+        $targetDir = "{$this->tempDir}/mixed_output";
+
+        $this->files->ensureDirectoryExists($stubsDir);
+        $this->files->put("{$stubsDir}/template.txt.stub", 'interpolated: {{ name }}');
+        $this->files->put("{$stubsDir}/binary_asset.bin", 'raw asset: {{ name }} should remain unchanged');
+        $this->files->put("{$stubsDir}/.DS_Store", 'junk file');
+        $this->files->put("{$stubsDir}/.gitkeep", '');
+
+        $engine = new StubEngine($this->files);
+        $result = $engine->scaffoldTree(
+            sourceDir: $stubsDir,
+            targetDir: $targetDir,
+            tokens: ['name' => 'Laravel'],
+        );
+
+        $this->assertSame(2, $result->totalFiles());
+        $this->assertTrue($result->hasRawCopied());
+        $this->assertContains('binary_asset.bin', $result->rawCopiedFiles);
+        $this->assertFileExists("{$targetDir}/template.txt");
+        $this->assertFileExists("{$targetDir}/binary_asset.bin");
+        $this->assertFileDoesNotExist("{$targetDir}/.DS_Store");
+        $this->assertFileDoesNotExist("{$targetDir}/.gitkeep");
+
+        $this->assertStringEqualsFile("{$targetDir}/template.txt", 'interpolated: Laravel');
+        $this->assertStringEqualsFile("{$targetDir}/binary_asset.bin", 'raw asset: {{ name }} should remain unchanged');
+    }
+
+    public function test_find_unresolved_tokens_and_strict_mode(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $content = 'Hello {{ name }}, role: {{ role }}, age: {{ age|studly }}';
+        $missing = $engine->findUnresolvedTokens($content);
+
+        $this->assertCount(3, $missing);
+        $this->assertContains('{{ name }}', $missing);
+        $this->assertContains('{{ role }}', $missing);
+        $this->assertContains('{{ age|studly }}', $missing);
+
+        $stubsDir = "{$this->tempDir}/strict_stubs";
+        $targetDir = "{$this->tempDir}/strict_output";
+
+        $this->files->ensureDirectoryExists($stubsDir);
+        $this->files->put("{$stubsDir}/strict.txt.stub", 'Hello {{ defined_token }} and {{ missing_token }}');
+
+        // Without strict mode, tracks unresolved tokens in ScaffoldResult
+        $result = $engine->scaffoldTree(
+            sourceDir: $stubsDir,
+            targetDir: $targetDir,
+            tokens: ['defined_token' => 'World'],
+            strict: false,
+        );
+
+        $this->assertTrue($result->hasUnresolvedTokens());
+        $this->assertArrayHasKey('strict.txt', $result->unresolvedTokens);
+        $this->assertContains('{{ missing_token }}', $result->unresolvedTokens['strict.txt']);
+
+        // With strict mode, throws InvalidArgumentException
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unresolved tokens in [strict.txt]: {{ missing_token }}');
+
+        $engine->scaffoldTree(
+            sourceDir: $stubsDir,
+            targetDir: "{$this->tempDir}/strict_output_fail",
+            tokens: ['defined_token' => 'World'],
+            strict: true,
+        );
+    }
+
+    public function test_standalone_engine_without_laravel_container(): void
+    {
+        Container::setInstance(null);
+        Facade::setFacadeApplication(null);
+
+        $engine = new StubEngine(
+            files: new Filesystem,
+            config: [
+                'delimiters' => [
+                    'open' => '<<',
+                    'close' => '>>',
+                ],
+                'global_tokens' => [
+                    'app' => 'Standalone',
+                ],
+            ],
+        );
+
+        $rendered = $engine->interpolate('Framework: << app >>, Version: << v >>', ['v' => '1.0']);
+        $this->assertSame('Framework: Standalone, Version: 1.0', $rendered);
     }
 }

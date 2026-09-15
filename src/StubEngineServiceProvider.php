@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexKassel\StubEngine;
 
 use AlexKassel\StubEngine\Services\StubEngine;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\ServiceProvider;
 
 class StubEngineServiceProvider extends ServiceProvider
@@ -24,7 +25,15 @@ class StubEngineServiceProvider extends ServiceProvider
             $this->mergeConfigFrom(self::CONFIG_PATH, self::CONFIG_KEY);
         }
 
-        $this->app->singleton(StubEngine::class);
+        $this->app->singleton(StubEngine::class, function ($app): StubEngine {
+            $files = $app->bound('files') ? $app->make('files') : new Filesystem;
+            $config = $app->bound('config') ? (array) $app['config']->get(self::CONFIG_KEY, []) : [];
+
+            return new StubEngine(
+                files: $files,
+                config: $config,
+            );
+        });
     }
 
     /**
