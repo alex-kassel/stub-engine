@@ -4,4 +4,3 @@ composer.lock
 .phpunit.cache/
 .DS_Store
 /workspace.json
-/.dev/

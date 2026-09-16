@@ -5,8 +5,7 @@
 
 /tests export-ignore
 /phpunit.xml.dist export-ignore
-/ROADMAP.md export-ignore
-/USE-CASES.md export-ignore
 /.github export-ignore
 /.editorconfig export-ignore
 /.gitattributes export-ignore
+/.dev export-ignore
