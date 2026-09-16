@@ -7,6 +7,7 @@ namespace AlexKassel\StubEngine\Services;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -19,6 +20,12 @@ class StubEngine
     public const DEFAULT_TOKEN_CLOSE_DELIMITER = '}}';
 
     public const DEFAULT_MODIFIER_SEPARATOR = '|';
+
+    public const DEFAULT_DATE_FORMAT = 'Y-m-d';
+
+    public const DEFAULT_LIMIT_LENGTH = 100;
+
+    public const DEFAULT_LIMIT_END = '...';
 
     public const CONFIG_DELIMITERS_KEY = 'delimiters';
 
@@ -293,8 +300,32 @@ class StubEngine
             'title' => Str::title($value),
             'plural' => Str::plural($value),
             'singular' => Str::singular($value),
+            'default' => $value === self::EMPTY_STRING_FALLBACK ? ($args[0] ?? self::EMPTY_STRING_FALLBACK) : $value,
+            'format', 'date' => $this->formatDate($value, $args[0] ?? self::DEFAULT_DATE_FORMAT),
+            'replace' => isset($args[0]) && $args[0] !== self::EMPTY_STRING_FALLBACK ? str_replace($args[0], $args[1] ?? self::EMPTY_STRING_FALLBACK, $value) : $value,
+            'limit' => Str::limit($value, isset($args[0]) && is_numeric($args[0]) ? (int) $args[0] : self::DEFAULT_LIMIT_LENGTH, $args[1] ?? self::DEFAULT_LIMIT_END),
+            'wrap' => ($args[0] ?? self::EMPTY_STRING_FALLBACK).$value.($args[1] ?? ($args[0] ?? self::EMPTY_STRING_FALLBACK)),
+            'trim' => $value !== self::EMPTY_STRING_FALLBACK && isset($args[0]) ? trim($value, $args[0]) : trim($value),
             default => $value,
         };
+    }
+
+    /**
+     * Format a date string or timestamp using Carbon.
+     */
+    protected function formatDate(string $value, string $format): string
+    {
+        if ($value === self::EMPTY_STRING_FALLBACK) {
+            return self::EMPTY_STRING_FALLBACK;
+        }
+
+        try {
+            $carbon = is_numeric($value) ? Carbon::createFromTimestamp((int) $value) : Carbon::parse($value);
+
+            return $carbon->format($format);
+        } catch (\Throwable) {
+            return $value;
+        }
     }
 
     /**

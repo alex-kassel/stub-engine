@@ -659,4 +659,43 @@ class StubEngineTest extends TestCase
         $this->assertNotContains('@{{ $blade_var }}', $unresolved);
         $this->assertNotContains('{{ $blade_var }}', $unresolved);
     }
+
+    public function test_built_in_parameterized_modifiers(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $template = implode("\n", [
+            'DefaultSet: {{ fallback | default:AcmeCorp }}',
+            'DefaultEmpty: {{ empty_var | default:FallbackValue }}',
+            'FormatDate: {{ timestamp | format:Y }}',
+            'Replace: {{ win_path | replace:\\,/ }}',
+            'Limit: {{ long_text | limit:10,... }}',
+            'WrapSingle: {{ tag | wrap:" }}',
+            'WrapDouble: {{ block | wrap:[,!] }}',
+            'Trim: {{ padded | trim:_ }}',
+            'ChainedWithParams: {{ model | default:billing_item | snake | plural }}',
+        ]);
+
+        $rendered = $engine->interpolate($template, [
+            'fallback' => 'CustomOrg',
+            'empty_var' => '',
+            'timestamp' => '2026-09-16 12:00:00',
+            'win_path' => 'app\\Domain\\Models',
+            'long_text' => 'The quick brown fox jumps over the lazy dog',
+            'tag' => 'header',
+            'block' => 'ALERT',
+            'padded' => '__clean__',
+            'model' => '',
+        ]);
+
+        $this->assertStringContainsString('DefaultSet: CustomOrg', $rendered);
+        $this->assertStringContainsString('DefaultEmpty: FallbackValue', $rendered);
+        $this->assertStringContainsString('FormatDate: 2026', $rendered);
+        $this->assertStringContainsString('Replace: app/Domain/Models', $rendered);
+        $this->assertStringContainsString('Limit: The quick...', $rendered);
+        $this->assertStringContainsString('WrapSingle: "header"', $rendered);
+        $this->assertStringContainsString('WrapDouble: [ALERT!]', $rendered);
+        $this->assertStringContainsString('Trim: clean', $rendered);
+        $this->assertStringContainsString('ChainedWithParams: billing_items', $rendered);
+    }
 }

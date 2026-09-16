@@ -82,11 +82,38 @@ Modifiers support optional parameters using colon-separated argument syntax:
 {{ token | modifier:arg1,arg2 }}
 ```
 
-When evaluated, the engine splits the directive by colon (`:`), extracts comma-separated arguments, trims them, and passes them as arguments to the modifier callback:
+When evaluated, the engine splits the directive by colon (`:`), extracts comma-separated arguments, trims them, and passes them to the modifier handler.
+
+### Built-in Parameterized Modifiers
+
+`StubEngine` includes 6 built-in parameterized utility modifiers:
+
+| Modifier | Syntax | Input Example | Output Example | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `default` | `default:value` | `""` | `"App\\Models"` | Fallback default if token value is empty string. |
+| `format` / `date` | `format:format_string` | `"2026-09-16 12:00:00"` | `"2026"` | Formats timestamps and dates using Carbon (`default: Y-m-d`). |
+| `replace` | `replace:search,replace` | `"app\\Domain\\Models"` | `"app/Domain/Models"` | Replaces occurrences of search string with replacement. |
+| `limit` | `limit:count,end` | `"The quick brown fox"` | `"The quick..."` | Truncates string using `Str::limit()` (`default: 100, "..."`). |
+| `wrap` | `wrap:before,after` | `"ALERT"` | `"[ALERT!]"` | Wraps value with prefix and suffix (`wrap:"` wraps in quotes). |
+| `trim` | `trim:characters` | `"__clean__"` | `"clean"` | Trims whitespace or specified characters. |
+
+### Practical Examples
 
 ```text
-{{ sku | prefix:SKU_ }}
-{{ content | wrap:[,!] }}
+// 1. Fallback default
+namespace {{ namespace | default:App\\Models }};
+
+// 2. Date formatting
+Copyright (c) {{ timestamp | format:Y }} {{ author }}
+
+// 3. Path normalization
+Path: {{ win_path | replace:\\,/ }}
+
+// 4. Content limit and wrapping
+Summary: {{ description | limit:50,... | wrap:" }}
+
+// 5. Chaining parameterized and case modifiers
+Table: {{ model | default:billing_item | snake | plural }}
 ```
 
 ---

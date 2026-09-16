@@ -30,7 +30,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
 * **Proposed Solution**:
   Support pipe-delimited modifier chains (e.g. `{{ var | mod1 | mod2 | mod3 }}`). When evaluating the match in `preg_replace_callback`, iterate sequentially through each modifier in the chain, piping the output of one modifier as the input into the next.
 
-### 1.4. Parameterized Modifiers
+### 1.4. Parameterized Modifiers [x] COMPLETED
 * **Problem**:
   Modifiers cannot accept dynamic or static arguments (e.g. `{{ date | format:Y-m-d }}`, `{{ namespace | default:App\\Models }}`, or `{{ text | replace:foo,bar }}`).
 * **Proposed Solution**:
