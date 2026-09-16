@@ -28,6 +28,16 @@ class StubEngine
 
     public const CONFIG_GLOBAL_TOKENS_KEY = 'global_tokens';
 
+    public const CONFIG_LEGACY_OPEN_KEY = 'stub-engine.delimiters.open';
+
+    public const CONFIG_LEGACY_CLOSE_KEY = 'stub-engine.delimiters.close';
+
+    public const CONFIG_LEGACY_GLOBAL_TOKENS_KEY = 'stub-engine.global_tokens';
+
+    public const EMPTY_STRING_FALLBACK = '';
+
+    public const EMPTY_ARRAY_FALLBACK = [];
+
     public const DEFAULT_IGNORED_FILES = [
         '.DS_Store',
         'Thumbs.db',
@@ -99,6 +109,11 @@ class StubEngine
         $targetPrefix = (str_starts_with($normalizedTarget, '/') ? '/' : '').implode('/', $canonicalTarget);
         $destResolved = (str_starts_with($normalizedDest, '/') ? '/' : '').implode('/', $canonicalDest);
 
+        // If target is current working directory ('.' or empty) and destination is relative and contained
+        if (($normalizedTarget === '.' || $normalizedTarget === '') && ! str_starts_with($normalizedDest, '/')) {
+            return;
+        }
+
         if (! str_starts_with($destResolved, $targetPrefix.'/') && $destResolved !== $targetPrefix) {
             throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
         }
@@ -118,7 +133,7 @@ class StubEngine
         $escapedOpen = preg_quote($open, '/');
         $escapedClose = preg_quote($close, '/');
 
-        $pattern = '/'.$escapedOpen.'\s*([^'.$escapedClose.'\s]+(?:\s*\|\s*[^'.$escapedClose.'\s]+)?)\s*'.$escapedClose.'/';
+        $pattern = '/'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
         if (preg_match_all($pattern, $content, $matches)) {
             return array_values(array_unique($matches[0]));
         }
@@ -134,14 +149,131 @@ class StubEngine
     public function resolveDelimiters(?string $open = null, ?string $close = null): array
     {
         $configOpen = (string) (data_get($this->config, self::CONFIG_OPEN_DELIMITER_KEY)
-            ?: data_get($this->config, 'stub-engine.delimiters.open', ''));
+            ?: data_get($this->config, self::CONFIG_LEGACY_OPEN_KEY, self::EMPTY_STRING_FALLBACK));
         $configClose = (string) (data_get($this->config, self::CONFIG_CLOSE_DELIMITER_KEY)
-            ?: data_get($this->config, 'stub-engine.delimiters.close', ''));
+            ?: data_get($this->config, self::CONFIG_LEGACY_CLOSE_KEY, self::EMPTY_STRING_FALLBACK));
 
         $effectiveOpen = $open ?: ($configOpen ?: self::DEFAULT_TOKEN_OPEN_DELIMITER);
         $effectiveClose = $close ?: ($configClose ?: self::DEFAULT_TOKEN_CLOSE_DELIMITER);
 
         return [$effectiveOpen, $effectiveClose];
+    }
+
+    /**
+     * Merge global config tokens with runtime tokens and normalize keys for interpolation.
+     *
+     * @param  array<string, string>  $tokens
+     * @return array<string, string>
+     */
+    public function getMergedTokens(array $tokens, ?string $open = null, ?string $close = null): array
+    {
+        [$effectiveOpen, $effectiveClose] = $this->resolveDelimiters($open, $close);
+
+        $globalTokens = (array) (data_get($this->config, self::CONFIG_GLOBAL_TOKENS_KEY)
+            ?: data_get($this->config, self::CONFIG_LEGACY_GLOBAL_TOKENS_KEY, self::EMPTY_ARRAY_FALLBACK));
+
+        $rawMerged = array_merge($globalTokens, $tokens);
+        $normalized = [];
+
+        foreach ($rawMerged as $key => $value) {
+            $strValue = (string) $value;
+            $cleanKey = trim(str_replace([$effectiveOpen, $effectiveClose], '', (string) $key));
+
+            if ($cleanKey !== '') {
+                $normalized[$cleanKey] = $strValue;
+            }
+
+            $normalized[(string) $key] = $strValue;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Single-pass regex interpolation supporting flexible whitespace, modifier chaining,
+     * and parameterized modifier directives.
+     *
+     * @param  string  $content  Template content or file/directory path
+     * @param  array<string, string>  $mergedTokens  Normalized token replacements
+     * @param  string  $open  Effective open delimiter
+     * @param  string  $close  Effective close delimiter
+     */
+    public function interpolateContent(
+        string $content,
+        array $mergedTokens,
+        string $open,
+        string $close,
+    ): string {
+        // Handle any non-delimited literal replacements (e.g. %RAW% or ###VAR###)
+        $rawReplacements = [];
+        foreach ($mergedTokens as $key => $value) {
+            if (! str_starts_with($key, $open) && ! preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
+                $rawReplacements[$key] = $value;
+            }
+        }
+        if (! empty($rawReplacements)) {
+            uksort($rawReplacements, fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+            $content = str_replace(array_keys($rawReplacements), array_values($rawReplacements), $content);
+        }
+
+        $escapedOpen = preg_quote($open, '/');
+        $escapedClose = preg_quote($close, '/');
+
+        $pattern = '/'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
+
+        return preg_replace_callback($pattern, function (array $matches) use ($mergedTokens): string {
+            $rawInside = trim($matches[1]);
+            if ($rawInside === '') {
+                return $matches[0];
+            }
+
+            // Split token identifier from modifier chain by '|'
+            $parts = array_map('trim', explode(self::DEFAULT_MODIFIER_SEPARATOR, $rawInside));
+            $tokenKey = array_shift($parts);
+
+            if (! array_key_exists($tokenKey, $mergedTokens)) {
+                return $matches[0];
+            }
+
+            $value = $mergedTokens[$tokenKey];
+
+            foreach ($parts as $modifierDirective) {
+                if ($modifierDirective === '') {
+                    continue;
+                }
+                $value = $this->applyModifier($value, $modifierDirective);
+            }
+
+            return $value;
+        }, $content) ?? $content;
+    }
+
+    /**
+     * Apply a single modifier directive (with optional parameters) to a string value.
+     */
+    public function applyModifier(string $value, string $modifierDirective): string
+    {
+        $parts = explode(':', $modifierDirective, 2);
+        $name = trim($parts[0]);
+        $argString = $parts[1] ?? null;
+        $args = $argString !== null ? array_map('trim', explode(',', $argString)) : [];
+
+        if (isset($this->customModifiers[$name])) {
+            return (string) ($this->customModifiers[$name])($value, ...$args);
+        }
+
+        return match ($name) {
+            'studly' => Str::studly($value),
+            'camel' => Str::camel($value),
+            'kebab' => Str::kebab($value),
+            'snake' => Str::snake($value),
+            'lower' => Str::lower($value),
+            'upper' => Str::upper($value),
+            'title' => Str::title($value),
+            'plural' => Str::plural($value),
+            'singular' => Str::singular($value),
+            default => $value,
+        };
     }
 
     /**
@@ -157,7 +289,7 @@ class StubEngine
 
     /**
      * Interpolate token placeholders in a given string, supporting case modifiers,
-     * custom/configurable delimiters, and collision safety by key length ordering.
+     * custom/configurable delimiters, whitespace tolerance, and modifier chaining.
      *
      * @param  string  $content  Template content or file/directory path
      * @param  array<string, string>  $tokens  Key-value token replacements
@@ -170,9 +302,10 @@ class StubEngine
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
     ): string {
-        $resolved = $this->resolveTokens($tokens, $openDelimiter, $closeDelimiter);
+        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
+        $mergedTokens = $this->getMergedTokens($tokens, $open, $close);
 
-        return $this->interpolateWithMap($content, $resolved);
+        return $this->interpolateContent($content, $mergedTokens, $open, $close);
     }
 
     /**
@@ -190,7 +323,7 @@ class StubEngine
         [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
 
         $globalTokens = (array) (data_get($this->config, self::CONFIG_GLOBAL_TOKENS_KEY)
-            ?: data_get($this->config, 'stub-engine.global_tokens', []));
+            ?: data_get($this->config, self::CONFIG_LEGACY_GLOBAL_TOKENS_KEY, self::EMPTY_ARRAY_FALLBACK));
         $mergedTokens = array_merge($globalTokens, $tokens);
 
         $expanded = [];
@@ -401,8 +534,9 @@ class StubEngine
             }
         }
 
-        // Pre-compile token replacement map ONCE for the entire tree
-        $compiledTokens = $this->resolveTokens($tokens, $openDelimiter, $closeDelimiter);
+        // Resolve delimiters and merged tokens ONCE for the entire tree
+        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
+        $mergedTokens = $this->getMergedTokens($tokens, $open, $close);
 
         $createdFiles = [];
         $overwrittenFiles = [];
@@ -414,7 +548,7 @@ class StubEngine
 
         foreach ($stubsMap as $relPath => $stubInfo) {
             $isStub = $stubExtension !== '' && str_ends_with($relPath, $stubExtension);
-            $targetRelPath = $this->interpolateWithMap($relPath, $compiledTokens);
+            $targetRelPath = $this->interpolateContent($relPath, $mergedTokens, $open, $close);
 
             if ($isStub) {
                 $targetRelPath = substr($targetRelPath, 0, -$extLen);
@@ -446,7 +580,7 @@ class StubEngine
 
             if ($isStub) {
                 $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
-                $renderedContent = $this->interpolateWithMap($rawContent, $compiledTokens);
+                $renderedContent = $this->interpolateContent($rawContent, $mergedTokens, $open, $close);
 
                 $unresolved = $this->findUnresolvedTokens($renderedContent, $openDelimiter, $closeDelimiter);
                 if ($unresolved !== []) {

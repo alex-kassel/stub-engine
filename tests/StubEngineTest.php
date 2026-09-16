@@ -525,4 +525,79 @@ class StubEngineTest extends TestCase
         $rendered = $engine->interpolate('Framework: << app >>, Version: << v >>', ['v' => '1.0']);
         $this->assertSame('Framework: Standalone, Version: 1.0', $rendered);
     }
+
+    public function test_modifier_chaining(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $template = 'Table: {{ entity | snake | plural }}, UpperSnake: {{ entity | snake | upper }}, Class: {{ entity | camel | studly }}';
+        $rendered = $engine->interpolate($template, [
+            'entity' => 'UserProfile',
+        ]);
+
+        $this->assertSame('Table: user_profiles, UpperSnake: USER_PROFILE, Class: UserProfile', $rendered);
+    }
+
+    public function test_whitespace_resilience_in_modifier_expressions(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $template = 'A: {{ name | studly}}, B: {{name | studly }}, C: {{  name  |  snake  |  plural  }}, D: {{name|upper}}';
+        $rendered = $engine->interpolate($template, [
+            'name' => 'order item',
+        ]);
+
+        $this->assertSame('A: OrderItem, B: OrderItem, C: order_items, D: ORDER ITEM', $rendered);
+    }
+
+    public function test_parameterized_modifiers(): void
+    {
+        $engine = new StubEngine($this->files);
+        $engine->registerModifier('prefix', fn (string $val, string $p = ''): string => $p.$val);
+        $engine->registerModifier('wrap', fn (string $val, string $before = '', string $after = ''): string => $before.$val.$after);
+
+        $template = 'Prefixed: {{ code | prefix:SKU_ }}, Wrapped: {{ code | wrap:[,!] }}';
+        $rendered = $engine->interpolate($template, [
+            'code' => '12345',
+        ]);
+
+        $this->assertSame('Prefixed: SKU_12345, Wrapped: [12345!]', $rendered);
+    }
+
+    public function test_scaffold_file_with_relative_path_in_current_directory(): void
+    {
+        $engine = new StubEngine($this->files);
+        $sourceStub = "{$this->tempDir}/standalone.stub";
+        $this->files->put($sourceStub, 'Content: {{ key }}');
+
+        // Target file with bare relative path inside current directory
+        $targetFile = 'test_relative_output_'.uniqid().'.txt';
+        try {
+            $created = $engine->scaffoldFile(
+                sourceFile: $sourceStub,
+                targetFile: $targetFile,
+                tokens: ['key' => 'Success'],
+            );
+
+            $this->assertTrue($created);
+            $this->assertFileExists($targetFile);
+            $this->assertStringEqualsFile($targetFile, 'Content: Success');
+        } finally {
+            if ($this->files->exists($targetFile)) {
+                $this->files->delete($targetFile);
+            }
+        }
+    }
+
+    public function test_find_unresolved_tokens_captures_placeholders_with_spaces_and_chains(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $template = 'Hello {{ missing_var | snake | plural }} and {{  another_missing  }}';
+        $unresolved = $engine->findUnresolvedTokens($template);
+
+        $this->assertCount(2, $unresolved);
+        $this->assertContains('{{ missing_var | snake | plural }}', $unresolved);
+        $this->assertContains('{{  another_missing  }}', $unresolved);
+    }
 }
