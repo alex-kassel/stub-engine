@@ -27,6 +27,8 @@ final readonly class ScaffoldResult implements Countable
      * @param  array<string, array<int, string>>  $unresolvedTokens  Map of relative file paths to any unreplaced token placeholders
      * @param  bool  $dryRun  Whether the operation was simulated without disk writes
      * @param  OverrideStrategy  $strategy  The override strategy used (Overlay or Replace)
+     * @param  array<int, string>  $warnings  Any operational warnings encountered during scaffolding
+     * @param  bool  $formatted  Whether generated code was formatted by Pint
      */
     public function __construct(
         public string $sourceDir,
@@ -39,6 +41,8 @@ final readonly class ScaffoldResult implements Countable
         public array $unresolvedTokens = [],
         public bool $dryRun = false,
         public OverrideStrategy $strategy = OverrideStrategy::Overlay,
+        public array $warnings = [],
+        public bool $formatted = false,
     ) {
         $this->renderedFiles = array_values(array_unique(array_merge($this->createdFiles, $this->overwrittenFiles)));
         $this->fileCount = count($this->renderedFiles);
@@ -115,5 +119,21 @@ final readonly class ScaffoldResult implements Countable
     public function isOverlay(): bool
     {
         return $this->strategy === OverrideStrategy::Overlay;
+    }
+
+    /**
+     * Check if any operational warnings were generated.
+     */
+    public function hasWarnings(): bool
+    {
+        return $this->warnings !== [];
+    }
+
+    /**
+     * Check if generated files were successfully formatted.
+     */
+    public function isFormatted(): bool
+    {
+        return $this->formatted;
     }
 }

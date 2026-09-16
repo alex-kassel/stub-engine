@@ -129,7 +129,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
   - `FileScaffolded`: Dispatched after a file is generated.
   - `TreeScaffolded`: Dispatched when the tree generation completes with `ScaffoldResult`.
 
-### 4.2. Code Formatting Pipeline Hook (Laravel Pint Integration)
+### 4.2. Code Formatting Pipeline Hook (Laravel Pint Integration) [x] COMPLETED
 * **Problem**:
   Generated PHP files often have minor indentation or whitespace artifacts caused by token interpolation.
 * **Proposed Solution**:

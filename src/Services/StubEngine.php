@@ -11,6 +11,7 @@ use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\Events\FileScaffolded;
 use AlexKassel\StubEngine\Events\FileScaffolding;
 use AlexKassel\StubEngine\Events\TreeScaffolded;
+use AlexKassel\StubEngine\Formatters\PintFormatter;
 use AlexKassel\StubEngine\Resolvers\StubResolver;
 use AlexKassel\StubEngine\Support\PathGuard;
 use BadMethodCallException;
@@ -27,6 +28,12 @@ class StubEngine
     use Macroable;
 
     public const DEFAULT_STUB_EXTENSION = '.stub';
+
+    public const DEFAULT_PINT_PATH = PintFormatter::DEFAULT_PINT_PATH;
+
+    public const DEFAULT_FORMAT_WITH_PINT = false;
+
+    public const DEFAULT_FORMAT_STRICT = false;
 
     public const DEFAULT_TOKEN_OPEN_DELIMITER = Interpolator::DEFAULT_TOKEN_OPEN_DELIMITER;
 
@@ -70,6 +77,8 @@ class StubEngine
 
     protected ?Dispatcher $events;
 
+    protected PintFormatter $formatter;
+
     /**
      * @param  Filesystem|null  $files  Filesystem repository
      * @param  array<string, mixed>  $config  Stub engine configuration array
@@ -77,6 +86,7 @@ class StubEngine
      * @param  StubResolver|null  $resolver  Stub discovery and overlay resolver
      * @param  PathGuard|null  $pathGuard  Target directory containment validator
      * @param  Dispatcher|null  $events  Laravel event dispatcher
+     * @param  PintFormatter|null  $formatter  Laravel Pint code formatter service
      */
     public function __construct(
         ?Filesystem $files = null,
@@ -85,12 +95,14 @@ class StubEngine
         ?StubResolver $resolver = null,
         ?PathGuard $pathGuard = null,
         ?Dispatcher $events = null,
+        ?PintFormatter $formatter = null,
     ) {
         $this->files = $files ?? new Filesystem;
         $this->interpolator = $interpolator ?? new Interpolator($this->config);
         $this->resolver = $resolver ?? new StubResolver($this->files);
         $this->pathGuard = $pathGuard ?? new PathGuard;
         $this->events = $events;
+        $this->formatter = $formatter ?? new PintFormatter;
     }
 
     /**
@@ -217,6 +229,14 @@ class StubEngine
         $this->events = $events;
 
         return $this;
+    }
+
+    /**
+     * Access the underlying PintFormatter instance.
+     */
+    public function formatter(): PintFormatter
+    {
+        return $this->formatter;
     }
 
     /**
@@ -426,6 +446,9 @@ class StubEngine
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
         bool $strict = false,
+        bool $formatWithPint = self::DEFAULT_FORMAT_WITH_PINT,
+        bool $formatStrict = self::DEFAULT_FORMAT_STRICT,
+        ?string $pintBinary = null,
     ): bool {
         $this->pathGuard->ensureWithinTargetDirectory(dirname($targetFile), $targetFile);
 
@@ -454,6 +477,10 @@ class StubEngine
         if (! $dryRun) {
             $this->files->ensureDirectoryExists(dirname($targetFile));
             $this->files->put($targetFile, $scaffoldingEvent->content);
+
+            if ($formatWithPint) {
+                $this->formatter->format([$targetFile], $formatStrict, $pintBinary);
+            }
         }
 
         $this->dispatchEvent(new FileScaffolded(
@@ -498,6 +525,9 @@ class StubEngine
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
         bool $strict = false,
+        bool $formatWithPint = self::DEFAULT_FORMAT_WITH_PINT,
+        bool $formatStrict = self::DEFAULT_FORMAT_STRICT,
+        ?string $pintBinary = null,
     ): ScaffoldResult {
         $stubsMap = $this->resolver->resolveStubsMap($sourceDir, $overrideDir, $strategy);
 
@@ -640,6 +670,20 @@ class StubEngine
             }
         }
 
+        $formatted = false;
+        $warnings = [];
+
+        if (! $dryRun && $formatWithPint) {
+            $allWrittenFiles = array_map(
+                static fn (string $rel): string => rtrim($targetDir, '/\\').'/'.$rel,
+                array_merge($createdFiles, $overwrittenFiles)
+            );
+
+            $formatResult = $this->formatter->format($allWrittenFiles, $formatStrict, $pintBinary);
+            $formatted = $formatResult['formatted'];
+            $warnings = $formatResult['warnings'];
+        }
+
         $result = new ScaffoldResult(
             sourceDir: $sourceDir,
             targetDir: $targetDir,
@@ -651,6 +695,8 @@ class StubEngine
             unresolvedTokens: $unresolvedTokensMap,
             dryRun: $dryRun,
             strategy: $strategy,
+            warnings: $warnings,
+            formatted: $formatted,
         );
 
         $this->dispatchEvent(new TreeScaffolded($result));

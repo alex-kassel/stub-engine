@@ -28,6 +28,10 @@ class ScaffoldBuilder
 
     public const DEFAULT_STRICT = false;
 
+    public const DEFAULT_FORMAT_WITH_PINT = false;
+
+    public const DEFAULT_FORMAT_STRICT = false;
+
     protected ?string $sourceDir = null;
 
     protected ?string $targetDir = null;
@@ -54,6 +58,12 @@ class ScaffoldBuilder
     protected bool $dryRun = self::DEFAULT_DRY_RUN;
 
     protected bool $strict = self::DEFAULT_STRICT;
+
+    protected bool $formatWithPint = self::DEFAULT_FORMAT_WITH_PINT;
+
+    protected bool $formatStrict = self::DEFAULT_FORMAT_STRICT;
+
+    protected ?string $pintBinary = null;
 
     protected ?string $openDelimiter = null;
 
@@ -269,6 +279,40 @@ class ScaffoldBuilder
     }
 
     /**
+     * Configure post-scaffolding code formatting using Laravel Pint.
+     *
+     * @param  bool  $enabled  Whether to run Laravel Pint on generated PHP files
+     * @param  bool  $strict  Whether to throw an exception if Pint is missing or fails
+     * @param  string|null  $binary  Optional custom path to the Pint executable
+     */
+    public function formatWithPint(
+        bool $enabled = true,
+        bool $strict = self::DEFAULT_FORMAT_STRICT,
+        ?string $binary = null,
+    ): self {
+        $this->formatWithPint = $enabled;
+        $this->formatStrict = $strict;
+        $this->pintBinary = $binary;
+
+        return $this;
+    }
+
+    /**
+     * Alias for formatWithPint.
+     *
+     * @param  bool  $enabled  Whether to run Laravel Pint on generated PHP files
+     * @param  bool  $strict  Whether to throw an exception if Pint is missing or fails
+     * @param  string|null  $binary  Optional custom path to the Pint executable
+     */
+    public function format(
+        bool $enabled = true,
+        bool $strict = self::DEFAULT_FORMAT_STRICT,
+        ?string $binary = null,
+    ): self {
+        return $this->formatWithPint($enabled, $strict, $binary);
+    }
+
+    /**
      * Access the underlying StubEngine coordinator.
      */
     public function engine(): StubEngine
@@ -321,6 +365,9 @@ class ScaffoldBuilder
             openDelimiter: $this->openDelimiter,
             closeDelimiter: $this->closeDelimiter,
             strict: $this->strict,
+            formatWithPint: $this->formatWithPint,
+            formatStrict: $this->formatStrict,
+            pintBinary: $this->pintBinary,
         );
     }
 
@@ -347,6 +394,9 @@ class ScaffoldBuilder
             openDelimiter: $this->openDelimiter,
             closeDelimiter: $this->closeDelimiter,
             strict: $this->strict,
+            formatWithPint: $this->formatWithPint,
+            formatStrict: $this->formatStrict,
+            pintBinary: $this->pintBinary,
         );
     }
 
