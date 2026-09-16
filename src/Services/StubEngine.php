@@ -8,10 +8,14 @@ use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Engines\Interpolator;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
+use AlexKassel\StubEngine\Events\FileScaffolded;
+use AlexKassel\StubEngine\Events\FileScaffolding;
+use AlexKassel\StubEngine\Events\TreeScaffolded;
 use AlexKassel\StubEngine\Resolvers\StubResolver;
 use AlexKassel\StubEngine\Support\PathGuard;
 use BadMethodCallException;
 use Closure;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Traits\Macroable;
 use InvalidArgumentException;
@@ -64,12 +68,15 @@ class StubEngine
 
     protected PathGuard $pathGuard;
 
+    protected ?Dispatcher $events;
+
     /**
      * @param  Filesystem|null  $files  Filesystem repository
      * @param  array<string, mixed>  $config  Stub engine configuration array
      * @param  Interpolator|null  $interpolator  Token interpolation engine
      * @param  StubResolver|null  $resolver  Stub discovery and overlay resolver
      * @param  PathGuard|null  $pathGuard  Target directory containment validator
+     * @param  Dispatcher|null  $events  Laravel event dispatcher
      */
     public function __construct(
         ?Filesystem $files = null,
@@ -77,11 +84,13 @@ class StubEngine
         ?Interpolator $interpolator = null,
         ?StubResolver $resolver = null,
         ?PathGuard $pathGuard = null,
+        ?Dispatcher $events = null,
     ) {
         $this->files = $files ?? new Filesystem;
         $this->interpolator = $interpolator ?? new Interpolator($this->config);
         $this->resolver = $resolver ?? new StubResolver($this->files);
         $this->pathGuard = $pathGuard ?? new PathGuard;
+        $this->events = $events;
     }
 
     /**
@@ -190,6 +199,36 @@ class StubEngine
     public function pathGuard(): PathGuard
     {
         return $this->pathGuard;
+    }
+
+    /**
+     * Access the underlying Laravel Event Dispatcher instance.
+     */
+    public function events(): ?Dispatcher
+    {
+        return $this->events;
+    }
+
+    /**
+     * Set or replace the Laravel Event Dispatcher instance.
+     */
+    public function setEventDispatcher(?Dispatcher $events): self
+    {
+        $this->events = $events;
+
+        return $this;
+    }
+
+    /**
+     * Dispatch an event through the configured dispatcher or global helper.
+     */
+    public function dispatchEvent(object $event): void
+    {
+        if ($this->events !== null) {
+            $this->events->dispatch($event);
+        } elseif (function_exists('app') && app()->bound('events')) {
+            app('events')->dispatch($event);
+        }
     }
 
     /**
@@ -395,11 +434,35 @@ class StubEngine
         }
 
         $rendered = $this->renderFile($sourceFile, $tokens, $overrideFile, $openDelimiter, $closeDelimiter, $strict);
+        $isOverride = $overrideFile !== null && $this->files->isFile($overrideFile);
+
+        $scaffoldingEvent = new FileScaffolding(
+            destination: $targetFile,
+            relativePath: basename($targetFile),
+            content: $rendered,
+            isOverride: $isOverride,
+            isRawCopy: false,
+            dryRun: $dryRun,
+        );
+
+        $this->dispatchEvent($scaffoldingEvent);
+
+        if ($scaffoldingEvent->shouldSkip) {
+            return false;
+        }
 
         if (! $dryRun) {
             $this->files->ensureDirectoryExists(dirname($targetFile));
-            $this->files->put($targetFile, $rendered);
+            $this->files->put($targetFile, $scaffoldingEvent->content);
         }
+
+        $this->dispatchEvent(new FileScaffolded(
+            destination: $targetFile,
+            relativePath: basename($targetFile),
+            isOverride: $isOverride,
+            isRawCopy: false,
+            dryRun: $dryRun,
+        ));
 
         return true;
     }
@@ -472,16 +535,6 @@ class StubEngine
                 continue;
             }
 
-            if ($exists) {
-                $overwrittenFiles[] = $targetRelPath;
-            } else {
-                $createdFiles[] = $targetRelPath;
-            }
-
-            if ($stubInfo['isOverride']) {
-                $overrideFiles[] = $targetRelPath;
-            }
-
             if ($isStub) {
                 $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
                 $unresolved = [];
@@ -494,22 +547,100 @@ class StubEngine
                     }
                 }
 
+                $scaffoldingEvent = new FileScaffolding(
+                    destination: $destination,
+                    relativePath: $targetRelPath,
+                    content: $renderedContent,
+                    isOverride: $stubInfo['isOverride'],
+                    isRawCopy: false,
+                    dryRun: $dryRun,
+                );
+
+                $this->dispatchEvent($scaffoldingEvent);
+
+                if ($scaffoldingEvent->shouldSkip) {
+                    $skippedFiles[] = $targetRelPath;
+                    if ($stubInfo['isOverride']) {
+                        $overrideFiles[] = $targetRelPath;
+                    }
+
+                    continue;
+                }
+
+                if ($exists) {
+                    $overwrittenFiles[] = $targetRelPath;
+                } else {
+                    $createdFiles[] = $targetRelPath;
+                }
+
+                if ($stubInfo['isOverride']) {
+                    $overrideFiles[] = $targetRelPath;
+                }
+
                 if (! $dryRun) {
                     $this->files->ensureDirectoryExists(dirname($destination));
-                    $this->files->put($destination, $renderedContent);
+                    $this->files->put($destination, $scaffoldingEvent->content);
                 }
+
+                $this->dispatchEvent(new FileScaffolded(
+                    destination: $destination,
+                    relativePath: $targetRelPath,
+                    isOverride: $stubInfo['isOverride'],
+                    isRawCopy: false,
+                    dryRun: $dryRun,
+                ));
             } else {
                 // Raw asset: copy directly without text replacement
+                $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
+
+                $scaffoldingEvent = new FileScaffolding(
+                    destination: $destination,
+                    relativePath: $targetRelPath,
+                    content: $rawContent,
+                    isOverride: $stubInfo['isOverride'],
+                    isRawCopy: true,
+                    dryRun: $dryRun,
+                );
+
+                $this->dispatchEvent($scaffoldingEvent);
+
+                if ($scaffoldingEvent->shouldSkip) {
+                    $skippedFiles[] = $targetRelPath;
+                    if ($stubInfo['isOverride']) {
+                        $overrideFiles[] = $targetRelPath;
+                    }
+
+                    continue;
+                }
+
+                if ($exists) {
+                    $overwrittenFiles[] = $targetRelPath;
+                } else {
+                    $createdFiles[] = $targetRelPath;
+                }
+
+                if ($stubInfo['isOverride']) {
+                    $overrideFiles[] = $targetRelPath;
+                }
+
                 $rawCopiedFiles[] = $targetRelPath;
 
                 if (! $dryRun) {
                     $this->files->ensureDirectoryExists(dirname($destination));
                     $this->files->copy($stubInfo['sourcePath'], $destination);
                 }
+
+                $this->dispatchEvent(new FileScaffolded(
+                    destination: $destination,
+                    relativePath: $targetRelPath,
+                    isOverride: $stubInfo['isOverride'],
+                    isRawCopy: true,
+                    dryRun: $dryRun,
+                ));
             }
         }
 
-        return new ScaffoldResult(
+        $result = new ScaffoldResult(
             sourceDir: $sourceDir,
             targetDir: $targetDir,
             createdFiles: $createdFiles,
@@ -521,5 +652,9 @@ class StubEngine
             dryRun: $dryRun,
             strategy: $strategy,
         );
+
+        $this->dispatchEvent(new TreeScaffolded($result));
+
+        return $result;
     }
 }

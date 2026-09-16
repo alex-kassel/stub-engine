@@ -28,10 +28,12 @@ class StubEngineServiceProvider extends ServiceProvider
         $this->app->singleton(StubEngine::class, function ($app): StubEngine {
             $files = $app->bound('files') ? $app->make('files') : new Filesystem;
             $config = $app->bound('config') ? (array) $app['config']->get(self::CONFIG_KEY, []) : [];
+            $events = $app->bound('events') ? $app->make('events') : null;
 
             return new StubEngine(
                 files: $files,
                 config: $config,
+                events: $events,
             );
         });
     }
