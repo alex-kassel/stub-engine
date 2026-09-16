@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\Facades;
 
+use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\Services\StubEngine as StubEngineService;
 use Illuminate\Support\Facades\Facade;
 
 /**
+ * @method static ScaffoldBuilder builder()
+ * @method static ScaffoldBuilder from(string $sourceDir)
+ * @method static ScaffoldBuilder fromFile(string $sourceFile)
+ * @method static ScaffoldBuilder forPackage(string $package, ?string $subpath = null)
  * @method static StubEngineService registerModifier(string $name, callable $callback)
  * @method static void ensureWithinTargetDirectory(string $targetDir, string $destination)
  * @method static array findUnresolvedTokens(string $content, ?string $openDelimiter = null, ?string $closeDelimiter = null)

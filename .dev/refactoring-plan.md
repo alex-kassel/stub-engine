@@ -80,7 +80,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
 
 ## Priority 3: Laravel-First Ergonomics & Developer Experience (Phase 3)
 
-### 3.1. Convention-Based Host Overrides Auto-Discovery
+### 3.1. Convention-Based Host Overrides Auto-Discovery [x] COMPLETED
 * **Problem**:
   Currently, callers must manually calculate and pass `overrideDir: base_path('stubs/my-package')` on every call to `scaffoldTree()`.
 * **Proposed Solution**:
@@ -94,7 +94,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
   ```
   `StubEngine` automatically checks whether `base_path('stubs/vendor/alex-kassel/my-package')` exists in the host application and applies it as the `overrideDir`.
 
-### 3.2. Fluent Builder Interface (`ScaffoldBuilder`)
+### 3.2. Fluent Builder Interface (`ScaffoldBuilder`) [x] COMPLETED
 * **Problem**:
   `scaffoldTree()` currently takes 11 parameters (`$sourceDir`, `$targetDir`, `$tokens`, `$overrideDir`, `$strategy`, `$stubExtension`, `$force`, `$dryRun`, `$openDelimiter`, `$closeDelimiter`, `$strict`). This parameter list is unwieldy and prone to ordering errors when not using named arguments.
 * **Proposed Solution**:

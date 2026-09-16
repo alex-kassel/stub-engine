@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\Services;
 
+use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Engines\Interpolator;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\Resolvers\StubResolver;
 use AlexKassel\StubEngine\Support\PathGuard;
+use BadMethodCallException;
+use Closure;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Traits\Macroable;
 use InvalidArgumentException;
+use RuntimeException;
+use Throwable;
 
 class StubEngine
 {
@@ -77,6 +82,82 @@ class StubEngine
         $this->interpolator = $interpolator ?? new Interpolator($this->config);
         $this->resolver = $resolver ?? new StubResolver($this->files);
         $this->pathGuard = $pathGuard ?? new PathGuard;
+    }
+
+    /**
+     * Create a new fluent ScaffoldBuilder instance bound to this engine.
+     */
+    public function newBuilder(): ScaffoldBuilder
+    {
+        return new ScaffoldBuilder($this);
+    }
+
+    /**
+     * Create a new fluent ScaffoldBuilder instance resolved from the container or fresh.
+     */
+    public static function builder(): ScaffoldBuilder
+    {
+        $engine = function_exists('app') && app()->bound(self::class)
+            ? app(self::class)
+            : new self;
+
+        return $engine->newBuilder();
+    }
+
+    /**
+     * Fluent entry point: start tree scaffolding from a source directory.
+     */
+    public static function from(string $sourceDir): ScaffoldBuilder
+    {
+        return static::builder()->from($sourceDir);
+    }
+
+    /**
+     * Fluent entry point: start single-file scaffolding from a source file.
+     */
+    public static function fromFile(string $sourceFile): ScaffoldBuilder
+    {
+        return static::builder()->fromFile($sourceFile);
+    }
+
+    /**
+     * Fluent entry point: auto-discover package overrides from host conventions.
+     */
+    public static function forPackage(string $package, ?string $subpath = null): ScaffoldBuilder
+    {
+        return static::builder()->forPackage($package, $subpath);
+    }
+
+    /**
+     * Dynamically handle calls to the class or forward to ScaffoldBuilder.
+     *
+     * @param  array<int, mixed>  $parameters
+     *
+     * @throws BadMethodCallException
+     */
+    public function __call(string $method, array $parameters): mixed
+    {
+        if (static::hasMacro($method)) {
+            $macro = static::$macros[$method];
+
+            if ($macro instanceof Closure) {
+                try {
+                    $macro = $macro->bindTo($this, static::class) ?? throw new RuntimeException;
+                } catch (Throwable) {
+                    $macro = $macro->bindTo(null, static::class);
+                }
+            }
+
+            return $macro(...$parameters);
+        }
+
+        if (method_exists(ScaffoldBuilder::class, $method)) {
+            return $this->newBuilder()->$method(...$parameters);
+        }
+
+        throw new BadMethodCallException(sprintf(
+            'Method %s::%s does not exist.', static::class, $method
+        ));
     }
 
     /**
