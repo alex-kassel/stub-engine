@@ -168,3 +168,28 @@ When scaffolded with `['model' => 'order item']`, this generates:
 2. Detects only tokens and modifier directives that are *actually present* in the file.
 3. Resolves and applies modifiers just-in-time (JIT).
 4. Executes with zero combinatorial dictionary explosion.
+
+---
+
+## 8. Escaping & Blade Template Compatibility
+
+When scaffolding Laravel applications, stub files often contain native Blade expressions:
+
+```blade
+<h1>{{ ClassName }}</h1>
+<p>{{ $user->name }}</p>
+```
+
+Because Blade uses the same default delimiters (`{{` and `}}`), `StubEngine` provides an `@` escape prefix, matching Laravel Blade's own verbatim escape convention:
+
+```blade
+<h1>{{ ClassName }}</h1>
+<p>@{{ $user->name }}</p>
+<a href="@{{ route('profile', ['id' => $user->id]) }}">View</a>
+```
+
+### How Escaping Works
+1. **Stripping `@`**: During interpolation, `@{{ ... }}` is converted directly to `{{ ... }}` on disk.
+2. **Bypassing Modifiers**: No token lookups or modifiers are evaluated inside escaped expressions.
+3. **Strict Mode Safety**: Escaped expressions are ignored by `findUnresolvedTokens()`, preventing false-positive exceptions when scaffolding in `strict: true` mode.
+4. **Custom Delimiters**: If you configure custom delimiters (such as `<% %>` or `[[ ]]`), native Blade tags `{{ $user->name }}` do not collide at all and require no escaping. However, `@` escaping is supported for any configured open delimiter (e.g. `@<% verbatim %>` -> `<% verbatim %>`).

@@ -6,13 +6,13 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
 
 ## Priority 1: Critical Fixes & Token Engine Overhaul (Phase 1)
 
-### 1.1. Single-Pass Regex Interpolation & Elimination of Exploding Dictionaries
+### 1.1. Single-Pass Regex Interpolation & Elimination of Exploding Dictionaries [x] COMPLETED
 * **Problem**: 
   Currently, `resolveTokens()` expands every single token into ~30 distinct dictionary variations (base tokens + 9 case modifiers * 3 whitespace variants + custom modifiers). For a template using 40 tokens across 50 files, this yields over 1,200 search keys and executes >60,000 iterations of `str_replace()` across file paths and file bodies, where 99.9% of searches find nothing. This is an O(F * T * M) operation (F = files, T = tokens, M = modifiers) that degrades performance rapidly as templates scale.
 * **Proposed Solution**:
   Replace dictionary-based `str_replace` with a single-pass `preg_replace_callback()` scanner. The engine scans template text exactly once (O(N) where N is content length), extracts only tokens and modifier directives that are *actually present* in the file, resolves them on-demand (JIT), and replaces them cleanly.
 
-### 1.2. Whitespace-Resilient Modifier & Token Parsing
+### 1.2. Whitespace-Resilient Modifier & Token Parsing [x] COMPLETED
 * **Problem**:
   The current engine hardcodes three specific string combinations for whitespace around delimiters and pipes:
   1. `{{ token|modifier }}`
@@ -24,7 +24,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
   `/{{\s*([a-zA-Z0-9_]+)(?:\s*\|\s*([a-zA-Z0-9_|:]+))?\s*}}/`
   This tolerates arbitrary whitespace around delimiters, token identifiers, and modifier separators without brittle permutations.
 
-### 1.3. Modifier Chaining
+### 1.3. Modifier Chaining [x] COMPLETED
 * **Problem**:
   Real-world code scaffolding frequently requires composing transformations, such as converting a model name into a table name: `{{ model | snake | plural }}` (e.g. `UserProfile` -> `user_profiles`) or generating URLs: `{{ name | lower | kebab }}`. The current implementation only allows a single modifier.
 * **Proposed Solution**:
@@ -36,20 +36,20 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
 * **Proposed Solution**:
   Support colon-separated modifier arguments syntax (`modifier:arg1,arg2`). Parse arguments in the modifier resolver and pass them to the registered modifier callable: `fn(string $value, ...$args): string`.
 
-### 1.5. Fix Relative Path Traversal Bug in `scaffoldFile`
+### 1.5. Fix Relative Path Traversal Bug in `scaffoldFile` [x] COMPLETED
 * **Problem**:
   In `scaffoldFile()`, the security check calls `$this->ensureWithinTargetDirectory(dirname($targetFile), $targetFile)`. When `$targetFile` is a bare relative filename in the current directory (e.g. `'output.txt'`), `dirname('output.txt')` returns `'.'`. Inside `ensureWithinTargetDirectory()`, `'.'` canonicalizes to an empty string prefix `''`, which causes `str_starts_with('output.txt', '/')` to evaluate to `false`, falsely triggering an `InvalidArgumentException: Target path [output.txt] attempts directory traversal outside target directory [.]`.
 * **Proposed Solution**:
   Normalize target directories and paths using realpath or absolute base resolution before traversal checks. If `$targetDir` is `.` or relative, anchor it to the current working directory or base path before comparing prefixes.
 
-### 1.6. Fix Incomplete Regex in `findUnresolvedTokens`
+### 1.6. Fix Incomplete Regex in `findUnresolvedTokens` [x] COMPLETED
 * **Problem**:
   The pattern in `findUnresolvedTokens()` uses `[^'.$escapedClose.'\s]+`, which explicitly forbids whitespace inside the token capture. If an unresolved placeholder contains inner spaces (such as `{{ missing_var | studly }}` with spaces around the pipe), the pattern breaks at the first space and fails to capture the token.
 * **Proposed Solution**:
   Update the detection pattern to match arbitrary token expressions up to the closing delimiter:
   `/{{\s*([^{}\r\n]+?)\s*}}/` (or matching custom configured delimiters).
 
-### 1.7. Blade Template Escape & Verbatim Syntax
+### 1.7. Blade Template Escape & Verbatim Syntax [x] COMPLETED
 * **Problem**:
   Laravel applications frequently scaffold `.blade.php` views containing native Blade expressions like `{{ $user->name }}` or `{{ route('home') }}`. With default `{{ }}` delimiters, strict mode crashes when encountering Blade tags, and non-strict mode may corrupt Blade variables.
 * **Proposed Solution**:
@@ -70,7 +70,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
   3. `AlexKassel\StubEngine\Resolvers\StubResolver`: Directory crawler that merges package stubs and host overrides under `Overlay` or `Replace` strategies.
   4. `AlexKassel\StubEngine\Services\StubEngine`: Thin coordinator service acting as the public facade and orchestrator.
 
-### 2.2. Enforce Strict Fallback Encapsulation (Project Standard)
+### 2.2. Enforce Strict Fallback Encapsulation (Project Standard) [x] COMPLETED
 * **Problem**:
   Several methods contain raw string literals in their bodies for config keys and defaults (e.g. line 137: `'stub-engine.delimiters.open'`, line 139: `'stub-engine.delimiters.close'`, line 193: `'stub-engine.global_tokens'`), violating the project's zero-raw-literals rule.
 * **Proposed Solution**:
