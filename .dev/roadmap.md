@@ -12,6 +12,7 @@ This document outlines architectural proposals and future feature specifications
 * [RFC-004: Post-Processor & Code Cleanup Pipeline](#rfc-004-post-processor--code-cleanup-pipeline)
 * [RFC-005: Stub Schema & Interactive Token Prompter](#rfc-005-stub-schema--interactive-token-prompter)
 * [RFC-006: First-Class Testing Kit & Snapshot Assertions](#rfc-006-first-class-testing-kit--snapshot-assertions)
+* [RFC-007: Expanded Built-in & Parameterized Token Modifiers](#rfc-007-expanded-built-in--parameterized-token-modifiers)
 
 ---
 
@@ -426,4 +427,70 @@ class MakeModuleCommandTest extends TestCase
 1. `assertScaffold()` accurately passes when created files match expectations and fails with descriptive messages when files are missing.
 2. `matchesDirectorySnapshot()` stores snapshot fixture on first run and validates exact textual identity on subsequent runs.
 3. Sandbox directories are automatically deleted upon test completion without leaving stray artifacts.
+
+---
+
+## RFC-007: Expanded Built-in & Parameterized Token Modifiers
+
+*Inspiration: Twig/Liquid filters and Laravel Blade string helpers.*
+
+### 1. Motivation & Problem Statement
+
+While `StubEngine` currently supports 9 built-in casing modifiers (`studly`, `camel`, `kebab`, `snake`, `lower`, `upper`, `title`, `plural`, `singular`), templates frequently require standard utility transformations such as:
+* Date and timestamp formatting (e.g. `{{ date | format:Y-m-d }}`)
+* Fallback default values for empty or undefined tokens (e.g. `{{ namespace | default:App\\Services }}`)
+* Substring replacement (e.g. `{{ path | replace:\\,/ }}`)
+* String truncation and padding (e.g. `{{ summary | limit:80,... }}`)
+* Enclosure wrapping (e.g. `{{ key | wrap:[,!] }}`)
+
+Currently, developers must register bespoke custom modifiers for each of these common operations.
+
+### 2. Proposed Public API & DX Example
+
+Template examples:
+
+```text
+// Date formatting
+Copyright (c) {{ date | format:Y }} {{ author }}
+Created at: {{ timestamp | format:Y-m-d H:i:s }}
+
+// Fallback defaults
+namespace {{ namespace | default:App\\Models }};
+
+// String truncation and replacement
+Description: {{ summary | limit:50,... }}
+Normalized: {{ class_path | replace:\\,/ }}
+
+// Modifier chaining with arguments
+Table: {{ model | default:Post | snake | plural }}
+```
+
+### 3. Architecture & Impacted Components
+
+* **Core Engine:** `AlexKassel\StubEngine\Services\StubEngine::applyModifier()`
+  * Add built-in handling for parameterized directives:
+    * `format:<date_format>`: Formats timestamps via `date()` or Carbon.
+    * `default:<fallback_value>`: Evaluates fallback if string is empty.
+    * `replace:<search>,<replace>`: String substitution.
+    * `limit:<integer>,<end>`: Truncation via `Str::limit()`.
+    * `wrap:<before>,<after>`: Surrounds content with prefix and suffix.
+* **Documentation:** Add examples and recipes in `docs/modifiers.md`.
+
+### 4. Implementation Boundaries & Non-Goals
+
+* **In Scope:**
+  * Core built-in utility modifiers: `format`, `default`, `replace`, `limit`, `wrap`.
+  * Multi-argument comma separation parsing (`modifier:arg1,arg2`).
+  * Full interoperability with custom modifiers and chaining.
+* **Non-Goals (Out of Scope):**
+  * Arbitrary PHP code execution inside templates.
+  * Complex expression parsing or arithmetic.
+
+### 5. Acceptance Criteria & Test Scenarios
+
+1. `format` modifier formats Unix timestamps and date strings according to the specified format string.
+2. `default` modifier returns the provided default value when the token value is empty string, and preserves the original value when non-empty.
+3. `replace` modifier correctly swaps target substrings.
+4. `limit` modifier truncates text using `Str::limit()`.
+5. Parameterized modifiers chain seamlessly with case and custom modifiers.
 

@@ -133,7 +133,8 @@ class StubEngine
         $escapedOpen = preg_quote($open, '/');
         $escapedClose = preg_quote($close, '/');
 
-        $pattern = '/'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
+        // Match tokens not preceded by Blade escape prefix (@)
+        $pattern = '/(?<!@)'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
         if (preg_match_all($pattern, $content, $matches)) {
             return array_values(array_unique($matches[0]));
         }
@@ -191,18 +192,20 @@ class StubEngine
 
     /**
      * Single-pass regex interpolation supporting flexible whitespace, modifier chaining,
-     * and parameterized modifier directives.
+     * parameterized modifier directives, and Blade verbatim escape prefixes (@{{ and \{{).
      *
      * @param  string  $content  Template content or file/directory path
      * @param  array<string, string>  $mergedTokens  Normalized token replacements
      * @param  string  $open  Effective open delimiter
      * @param  string  $close  Effective close delimiter
+     * @param  array<int, string>|null  $unresolved  Optional output reference for unresolved placeholders
      */
     public function interpolateContent(
         string $content,
         array $mergedTokens,
         string $open,
         string $close,
+        ?array &$unresolved = null,
     ): string {
         // Handle any non-delimited literal replacements (e.g. %RAW% or ###VAR###)
         $rawReplacements = [];
@@ -219,10 +222,20 @@ class StubEngine
         $escapedOpen = preg_quote($open, '/');
         $escapedClose = preg_quote($close, '/');
 
-        $pattern = '/'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
+        // Pattern matching optional Blade escape prefix (@) followed by delimiters
+        $pattern = '/(@)?'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
 
-        return preg_replace_callback($pattern, function (array $matches) use ($mergedTokens): string {
-            $rawInside = trim($matches[1]);
+        $unresolvedList = [];
+
+        $result = preg_replace_callback($pattern, function (array $matches) use ($mergedTokens, $open, $close, &$unresolvedList): string {
+            $escapePrefix = $matches[1] ?? '';
+            $rawInside = trim($matches[2]);
+
+            // If escaped with @, strip the escape character and preserve {{ ... }} verbatim
+            if ($escapePrefix === '@') {
+                return $open.$matches[2].$close;
+            }
+
             if ($rawInside === '') {
                 return $matches[0];
             }
@@ -232,6 +245,8 @@ class StubEngine
             $tokenKey = array_shift($parts);
 
             if (! array_key_exists($tokenKey, $mergedTokens)) {
+                $unresolvedList[] = $matches[0];
+
                 return $matches[0];
             }
 
@@ -246,6 +261,12 @@ class StubEngine
 
             return $value;
         }, $content) ?? $content;
+
+        if ($unresolved !== null) {
+            $unresolved = array_values(array_unique($unresolvedList));
+        }
+
+        return $result;
     }
 
     /**
@@ -289,23 +310,26 @@ class StubEngine
 
     /**
      * Interpolate token placeholders in a given string, supporting case modifiers,
-     * custom/configurable delimiters, whitespace tolerance, and modifier chaining.
+     * custom/configurable delimiters, whitespace tolerance, modifier chaining,
+     * and Blade verbatim escape syntax (@{{ and \{{).
      *
      * @param  string  $content  Template content or file/directory path
      * @param  array<string, string>  $tokens  Key-value token replacements
      * @param  string|null  $openDelimiter  Optional runtime open delimiter override
      * @param  string|null  $closeDelimiter  Optional runtime close delimiter override
+     * @param  array<int, string>|null  $unresolved  Optional output reference for unresolved placeholders
      */
     public function interpolate(
         string $content,
         array $tokens,
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
+        ?array &$unresolved = null,
     ): string {
         [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
         $mergedTokens = $this->getMergedTokens($tokens, $open, $close);
 
-        return $this->interpolateContent($content, $mergedTokens, $open, $close);
+        return $this->interpolateContent($content, $mergedTokens, $open, $close, $unresolved);
     }
 
     /**
@@ -401,13 +425,11 @@ class StubEngine
         }
 
         $content = (string) $this->files->get($effectiveSource);
-        $rendered = $this->interpolate($content, $tokens, $openDelimiter, $closeDelimiter);
+        $unresolved = [];
+        $rendered = $this->interpolate($content, $tokens, $openDelimiter, $closeDelimiter, $unresolved);
 
-        if ($strict) {
-            $unresolved = $this->findUnresolvedTokens($rendered, $openDelimiter, $closeDelimiter);
-            if ($unresolved !== []) {
-                throw new InvalidArgumentException("Unresolved tokens in stub file [{$effectiveSource}]: ".implode(', ', $unresolved));
-            }
+        if ($strict && $unresolved !== []) {
+            throw new InvalidArgumentException("Unresolved tokens in stub file [{$effectiveSource}]: ".implode(', ', $unresolved));
         }
 
         return $rendered;
@@ -580,9 +602,9 @@ class StubEngine
 
             if ($isStub) {
                 $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
-                $renderedContent = $this->interpolateContent($rawContent, $mergedTokens, $open, $close);
+                $unresolved = [];
+                $renderedContent = $this->interpolateContent($rawContent, $mergedTokens, $open, $close, $unresolved);
 
-                $unresolved = $this->findUnresolvedTokens($renderedContent, $openDelimiter, $closeDelimiter);
                 if ($unresolved !== []) {
                     $unresolvedTokensMap[$targetRelPath] = $unresolved;
                     if ($strict) {

@@ -600,4 +600,63 @@ class StubEngineTest extends TestCase
         $this->assertContains('{{ missing_var | snake | plural }}', $unresolved);
         $this->assertContains('{{  another_missing  }}', $unresolved);
     }
+
+    public function test_blade_template_escape_and_verbatim_syntax(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $template = '<h1>{{ title }}</h1><div>@{{ $user->name }}</div><span>@{{ route(\'profile\', [\'id\' => $user->id]) }}</span>';
+        $rendered = $engine->interpolate($template, [
+            'title' => 'User Dashboard',
+        ]);
+
+        $this->assertSame(
+            '<h1>User Dashboard</h1><div>{{ $user->name }}</div><span>{{ route(\'profile\', [\'id\' => $user->id]) }}</span>',
+            $rendered
+        );
+    }
+
+    public function test_blade_escaping_in_strict_mode_does_not_trigger_unresolved_exception(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $stubsDir = "{$this->tempDir}/blade_stubs";
+        $targetDir = "{$this->tempDir}/blade_output";
+
+        $this->files->ensureDirectoryExists($stubsDir);
+        $this->files->put(
+            "{$stubsDir}/view.blade.php.stub",
+            '<x-layout title="{{ pageTitle }}"><p>@{{ $post->title }}</p></x-layout>'
+        );
+
+        // In strict mode, escaped Blade syntax should NOT trigger an exception
+        $result = $engine->scaffoldTree(
+            sourceDir: $stubsDir,
+            targetDir: $targetDir,
+            tokens: ['pageTitle' => 'Blog Post'],
+            strict: true,
+        );
+
+        $this->assertSame(1, $result->totalFiles());
+        $this->assertFalse($result->hasUnresolvedTokens());
+        $this->assertFileExists("{$targetDir}/view.blade.php");
+        $this->assertStringEqualsFile(
+            "{$targetDir}/view.blade.php",
+            '<x-layout title="Blog Post"><p>{{ $post->title }}</p></x-layout>'
+        );
+    }
+
+    public function test_find_unresolved_tokens_ignores_blade_escaped_expressions(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $template = 'Valid: {{ resolved }}, Escaped: @{{ $blade_var }}, Missing: {{ missing_var }}';
+        $unresolved = $engine->findUnresolvedTokens($template);
+
+        $this->assertCount(2, $unresolved);
+        $this->assertContains('{{ resolved }}', $unresolved);
+        $this->assertContains('{{ missing_var }}', $unresolved);
+        $this->assertNotContains('@{{ $blade_var }}', $unresolved);
+        $this->assertNotContains('{{ $blade_var }}', $unresolved);
+    }
 }
