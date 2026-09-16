@@ -5,72 +5,120 @@ declare(strict_types=1);
 namespace AlexKassel\StubEngine\Services;
 
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
+use AlexKassel\StubEngine\Engines\Interpolator;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
+use AlexKassel\StubEngine\Resolvers\StubResolver;
+use AlexKassel\StubEngine\Support\PathGuard;
 use Illuminate\Filesystem\Filesystem;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
+use Illuminate\Support\Traits\Macroable;
 use InvalidArgumentException;
 
 class StubEngine
 {
+    use Macroable;
+
     public const DEFAULT_STUB_EXTENSION = '.stub';
 
-    public const DEFAULT_TOKEN_OPEN_DELIMITER = '{{';
+    public const DEFAULT_TOKEN_OPEN_DELIMITER = Interpolator::DEFAULT_TOKEN_OPEN_DELIMITER;
 
-    public const DEFAULT_TOKEN_CLOSE_DELIMITER = '}}';
+    public const DEFAULT_TOKEN_CLOSE_DELIMITER = Interpolator::DEFAULT_TOKEN_CLOSE_DELIMITER;
 
-    public const DEFAULT_MODIFIER_SEPARATOR = '|';
+    public const DEFAULT_MODIFIER_SEPARATOR = Interpolator::DEFAULT_MODIFIER_SEPARATOR;
 
-    public const DEFAULT_DATE_FORMAT = 'Y-m-d';
+    public const DEFAULT_DATE_FORMAT = Interpolator::DEFAULT_DATE_FORMAT;
 
-    public const DEFAULT_LIMIT_LENGTH = 100;
+    public const DEFAULT_LIMIT_LENGTH = Interpolator::DEFAULT_LIMIT_LENGTH;
 
-    public const DEFAULT_LIMIT_END = '...';
+    public const DEFAULT_LIMIT_END = Interpolator::DEFAULT_LIMIT_END;
 
-    public const CONFIG_DELIMITERS_KEY = 'delimiters';
+    public const CONFIG_DELIMITERS_KEY = Interpolator::CONFIG_DELIMITERS_KEY;
 
-    public const CONFIG_OPEN_DELIMITER_KEY = 'delimiters.open';
+    public const CONFIG_OPEN_DELIMITER_KEY = Interpolator::CONFIG_OPEN_DELIMITER_KEY;
 
-    public const CONFIG_CLOSE_DELIMITER_KEY = 'delimiters.close';
+    public const CONFIG_CLOSE_DELIMITER_KEY = Interpolator::CONFIG_CLOSE_DELIMITER_KEY;
 
-    public const CONFIG_GLOBAL_TOKENS_KEY = 'global_tokens';
+    public const CONFIG_GLOBAL_TOKENS_KEY = Interpolator::CONFIG_GLOBAL_TOKENS_KEY;
 
-    public const CONFIG_LEGACY_OPEN_KEY = 'stub-engine.delimiters.open';
+    public const CONFIG_LEGACY_OPEN_KEY = Interpolator::CONFIG_LEGACY_OPEN_KEY;
 
-    public const CONFIG_LEGACY_CLOSE_KEY = 'stub-engine.delimiters.close';
+    public const CONFIG_LEGACY_CLOSE_KEY = Interpolator::CONFIG_LEGACY_CLOSE_KEY;
 
-    public const CONFIG_LEGACY_GLOBAL_TOKENS_KEY = 'stub-engine.global_tokens';
+    public const CONFIG_LEGACY_GLOBAL_TOKENS_KEY = Interpolator::CONFIG_LEGACY_GLOBAL_TOKENS_KEY;
 
-    public const EMPTY_STRING_FALLBACK = '';
+    public const EMPTY_STRING_FALLBACK = Interpolator::EMPTY_STRING_FALLBACK;
 
-    public const EMPTY_ARRAY_FALLBACK = [];
+    public const EMPTY_ARRAY_FALLBACK = Interpolator::EMPTY_ARRAY_FALLBACK;
 
-    public const DEFAULT_IGNORED_FILES = [
-        '.DS_Store',
-        'Thumbs.db',
-        '.gitkeep',
-    ];
+    public const DEFAULT_IGNORED_FILES = StubResolver::DEFAULT_IGNORED_FILES;
 
-    /** @var array<string, callable(string): string> */
-    protected array $customModifiers = [];
+    protected Filesystem $files;
+
+    protected Interpolator $interpolator;
+
+    protected StubResolver $resolver;
+
+    protected PathGuard $pathGuard;
 
     /**
-     * @param  Filesystem  $files  Filesystem repository
+     * @param  Filesystem|null  $files  Filesystem repository
      * @param  array<string, mixed>  $config  Stub engine configuration array
+     * @param  Interpolator|null  $interpolator  Token interpolation engine
+     * @param  StubResolver|null  $resolver  Stub discovery and overlay resolver
+     * @param  PathGuard|null  $pathGuard  Target directory containment validator
      */
     public function __construct(
-        protected Filesystem $files = new Filesystem,
+        ?Filesystem $files = null,
         protected array $config = [],
-    ) {}
+        ?Interpolator $interpolator = null,
+        ?StubResolver $resolver = null,
+        ?PathGuard $pathGuard = null,
+    ) {
+        $this->files = $files ?? new Filesystem;
+        $this->interpolator = $interpolator ?? new Interpolator($this->config);
+        $this->resolver = $resolver ?? new StubResolver($this->files);
+        $this->pathGuard = $pathGuard ?? new PathGuard;
+    }
+
+    /**
+     * Access the underlying Filesystem instance.
+     */
+    public function filesystem(): Filesystem
+    {
+        return $this->files;
+    }
+
+    /**
+     * Access the underlying Interpolator instance.
+     */
+    public function interpolator(): Interpolator
+    {
+        return $this->interpolator;
+    }
+
+    /**
+     * Access the underlying StubResolver instance.
+     */
+    public function resolver(): StubResolver
+    {
+        return $this->resolver;
+    }
+
+    /**
+     * Access the underlying PathGuard instance.
+     */
+    public function pathGuard(): PathGuard
+    {
+        return $this->pathGuard;
+    }
 
     /**
      * Register a custom token modifier callback.
      *
-     * @param  callable(string): string  $callback
+     * @param  callable(string, ...mixed): string  $callback
      */
     public function registerModifier(string $name, callable $callback): self
     {
-        $this->customModifiers[$name] = $callback;
+        $this->interpolator->registerModifier($name, $callback);
 
         return $this;
     }
@@ -82,48 +130,7 @@ class StubEngine
      */
     public function ensureWithinTargetDirectory(string $targetDir, string $destination): void
     {
-        $normalizedTarget = rtrim(str_replace('\\', '/', $targetDir), '/');
-        $normalizedDest = str_replace('\\', '/', $destination);
-
-        $destParts = explode('/', $normalizedDest);
-        $canonicalDest = [];
-
-        foreach ($destParts as $part) {
-            if ($part === '' || $part === '.') {
-                continue;
-            }
-            if ($part === '..') {
-                if (empty($canonicalDest)) {
-                    throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
-                }
-                array_pop($canonicalDest);
-            } else {
-                $canonicalDest[] = $part;
-            }
-        }
-
-        $targetParts = array_values(array_filter(explode('/', $normalizedTarget), fn (string $p): bool => $p !== ''));
-        $canonicalTarget = [];
-
-        foreach ($targetParts as $part) {
-            if ($part === '..') {
-                array_pop($canonicalTarget);
-            } elseif ($part !== '.') {
-                $canonicalTarget[] = $part;
-            }
-        }
-
-        $targetPrefix = (str_starts_with($normalizedTarget, '/') ? '/' : '').implode('/', $canonicalTarget);
-        $destResolved = (str_starts_with($normalizedDest, '/') ? '/' : '').implode('/', $canonicalDest);
-
-        // If target is current working directory ('.' or empty) and destination is relative and contained
-        if (($normalizedTarget === '.' || $normalizedTarget === '') && ! str_starts_with($normalizedDest, '/')) {
-            return;
-        }
-
-        if (! str_starts_with($destResolved, $targetPrefix.'/') && $destResolved !== $targetPrefix) {
-            throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
-        }
+        $this->pathGuard->ensureWithinTargetDirectory($targetDir, $destination);
     }
 
     /**
@@ -136,17 +143,7 @@ class StubEngine
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
     ): array {
-        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
-        $escapedOpen = preg_quote($open, '/');
-        $escapedClose = preg_quote($close, '/');
-
-        // Match tokens not preceded by Blade escape prefix (@)
-        $pattern = '/(?<!@)'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
-        if (preg_match_all($pattern, $content, $matches)) {
-            return array_values(array_unique($matches[0]));
-        }
-
-        return [];
+        return $this->interpolator->findUnresolvedTokens($content, $openDelimiter, $closeDelimiter);
     }
 
     /**
@@ -156,15 +153,7 @@ class StubEngine
      */
     public function resolveDelimiters(?string $open = null, ?string $close = null): array
     {
-        $configOpen = (string) (data_get($this->config, self::CONFIG_OPEN_DELIMITER_KEY)
-            ?: data_get($this->config, self::CONFIG_LEGACY_OPEN_KEY, self::EMPTY_STRING_FALLBACK));
-        $configClose = (string) (data_get($this->config, self::CONFIG_CLOSE_DELIMITER_KEY)
-            ?: data_get($this->config, self::CONFIG_LEGACY_CLOSE_KEY, self::EMPTY_STRING_FALLBACK));
-
-        $effectiveOpen = $open ?: ($configOpen ?: self::DEFAULT_TOKEN_OPEN_DELIMITER);
-        $effectiveClose = $close ?: ($configClose ?: self::DEFAULT_TOKEN_CLOSE_DELIMITER);
-
-        return [$effectiveOpen, $effectiveClose];
+        return $this->interpolator->resolveDelimiters($open, $close);
     }
 
     /**
@@ -175,31 +164,12 @@ class StubEngine
      */
     public function getMergedTokens(array $tokens, ?string $open = null, ?string $close = null): array
     {
-        [$effectiveOpen, $effectiveClose] = $this->resolveDelimiters($open, $close);
-
-        $globalTokens = (array) (data_get($this->config, self::CONFIG_GLOBAL_TOKENS_KEY)
-            ?: data_get($this->config, self::CONFIG_LEGACY_GLOBAL_TOKENS_KEY, self::EMPTY_ARRAY_FALLBACK));
-
-        $rawMerged = array_merge($globalTokens, $tokens);
-        $normalized = [];
-
-        foreach ($rawMerged as $key => $value) {
-            $strValue = (string) $value;
-            $cleanKey = trim(str_replace([$effectiveOpen, $effectiveClose], '', (string) $key));
-
-            if ($cleanKey !== '') {
-                $normalized[$cleanKey] = $strValue;
-            }
-
-            $normalized[(string) $key] = $strValue;
-        }
-
-        return $normalized;
+        return $this->interpolator->getMergedTokens($tokens, $open, $close);
     }
 
     /**
      * Single-pass regex interpolation supporting flexible whitespace, modifier chaining,
-     * parameterized modifier directives, and Blade verbatim escape prefixes (@{{ and \{{).
+     * parameterized modifier directives, and Blade verbatim escape prefixes (@{{).
      *
      * @param  string  $content  Template content or file/directory path
      * @param  array<string, string>  $mergedTokens  Normalized token replacements
@@ -214,66 +184,7 @@ class StubEngine
         string $close,
         ?array &$unresolved = null,
     ): string {
-        // Handle any non-delimited literal replacements (e.g. %RAW% or ###VAR###)
-        $rawReplacements = [];
-        foreach ($mergedTokens as $key => $value) {
-            if (! str_starts_with($key, $open) && ! preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
-                $rawReplacements[$key] = $value;
-            }
-        }
-        if (! empty($rawReplacements)) {
-            uksort($rawReplacements, fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-            $content = str_replace(array_keys($rawReplacements), array_values($rawReplacements), $content);
-        }
-
-        $escapedOpen = preg_quote($open, '/');
-        $escapedClose = preg_quote($close, '/');
-
-        // Pattern matching optional Blade escape prefix (@) followed by delimiters
-        $pattern = '/(@)?'.$escapedOpen.'((?:(?!'.$escapedOpen.'|'.$escapedClose.').)+)'.$escapedClose.'/s';
-
-        $unresolvedList = [];
-
-        $result = preg_replace_callback($pattern, function (array $matches) use ($mergedTokens, $open, $close, &$unresolvedList): string {
-            $escapePrefix = $matches[1] ?? '';
-            $rawInside = trim($matches[2]);
-
-            // If escaped with @, strip the escape character and preserve {{ ... }} verbatim
-            if ($escapePrefix === '@') {
-                return $open.$matches[2].$close;
-            }
-
-            if ($rawInside === '') {
-                return $matches[0];
-            }
-
-            // Split token identifier from modifier chain by '|'
-            $parts = array_map('trim', explode(self::DEFAULT_MODIFIER_SEPARATOR, $rawInside));
-            $tokenKey = array_shift($parts);
-
-            if (! array_key_exists($tokenKey, $mergedTokens)) {
-                $unresolvedList[] = $matches[0];
-
-                return $matches[0];
-            }
-
-            $value = $mergedTokens[$tokenKey];
-
-            foreach ($parts as $modifierDirective) {
-                if ($modifierDirective === '') {
-                    continue;
-                }
-                $value = $this->applyModifier($value, $modifierDirective);
-            }
-
-            return $value;
-        }, $content) ?? $content;
-
-        if ($unresolved !== null) {
-            $unresolved = array_values(array_unique($unresolvedList));
-        }
-
-        return $result;
+        return $this->interpolator->interpolateContent($content, $mergedTokens, $open, $close, $unresolved);
     }
 
     /**
@@ -281,51 +192,7 @@ class StubEngine
      */
     public function applyModifier(string $value, string $modifierDirective): string
     {
-        $parts = explode(':', $modifierDirective, 2);
-        $name = trim($parts[0]);
-        $argString = $parts[1] ?? null;
-        $args = $argString !== null ? array_map('trim', explode(',', $argString)) : [];
-
-        if (isset($this->customModifiers[$name])) {
-            return (string) ($this->customModifiers[$name])($value, ...$args);
-        }
-
-        return match ($name) {
-            'studly' => Str::studly($value),
-            'camel' => Str::camel($value),
-            'kebab' => Str::kebab($value),
-            'snake' => Str::snake($value),
-            'lower' => Str::lower($value),
-            'upper' => Str::upper($value),
-            'title' => Str::title($value),
-            'plural' => Str::plural($value),
-            'singular' => Str::singular($value),
-            'default' => $value === self::EMPTY_STRING_FALLBACK ? ($args[0] ?? self::EMPTY_STRING_FALLBACK) : $value,
-            'format', 'date' => $this->formatDate($value, $args[0] ?? self::DEFAULT_DATE_FORMAT),
-            'replace' => isset($args[0]) && $args[0] !== self::EMPTY_STRING_FALLBACK ? str_replace($args[0], $args[1] ?? self::EMPTY_STRING_FALLBACK, $value) : $value,
-            'limit' => Str::limit($value, isset($args[0]) && is_numeric($args[0]) ? (int) $args[0] : self::DEFAULT_LIMIT_LENGTH, $args[1] ?? self::DEFAULT_LIMIT_END),
-            'wrap' => ($args[0] ?? self::EMPTY_STRING_FALLBACK).$value.($args[1] ?? ($args[0] ?? self::EMPTY_STRING_FALLBACK)),
-            'trim' => $value !== self::EMPTY_STRING_FALLBACK && isset($args[0]) ? trim($value, $args[0]) : trim($value),
-            default => $value,
-        };
-    }
-
-    /**
-     * Format a date string or timestamp using Carbon.
-     */
-    protected function formatDate(string $value, string $format): string
-    {
-        if ($value === self::EMPTY_STRING_FALLBACK) {
-            return self::EMPTY_STRING_FALLBACK;
-        }
-
-        try {
-            $carbon = is_numeric($value) ? Carbon::createFromTimestamp((int) $value) : Carbon::parse($value);
-
-            return $carbon->format($format);
-        } catch (\Throwable) {
-            return $value;
-        }
+        return $this->interpolator->applyModifier($value, $modifierDirective);
     }
 
     /**
@@ -336,13 +203,13 @@ class StubEngine
      */
     public function interpolateWithMap(string $content, array $compiledTokens): string
     {
-        return str_replace(array_keys($compiledTokens), array_values($compiledTokens), $content);
+        return $this->interpolator->interpolateWithMap($content, $compiledTokens);
     }
 
     /**
      * Interpolate token placeholders in a given string, supporting case modifiers,
      * custom/configurable delimiters, whitespace tolerance, modifier chaining,
-     * and Blade verbatim escape syntax (@{{ and \{{).
+     * and Blade verbatim escape syntax (@{{).
      *
      * @param  string  $content  Template content or file/directory path
      * @param  array<string, string>  $tokens  Key-value token replacements
@@ -357,10 +224,7 @@ class StubEngine
         ?string $closeDelimiter = null,
         ?array &$unresolved = null,
     ): string {
-        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
-        $mergedTokens = $this->getMergedTokens($tokens, $open, $close);
-
-        return $this->interpolateContent($content, $mergedTokens, $open, $close, $unresolved);
+        return $this->interpolator->interpolate($content, $tokens, $openDelimiter, $closeDelimiter, $unresolved);
     }
 
     /**
@@ -375,57 +239,7 @@ class StubEngine
         ?string $openDelimiter = null,
         ?string $closeDelimiter = null,
     ): array {
-        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
-
-        $globalTokens = (array) (data_get($this->config, self::CONFIG_GLOBAL_TOKENS_KEY)
-            ?: data_get($this->config, self::CONFIG_LEGACY_GLOBAL_TOKENS_KEY, self::EMPTY_ARRAY_FALLBACK));
-        $mergedTokens = array_merge($globalTokens, $tokens);
-
-        $expanded = [];
-
-        foreach ($mergedTokens as $key => $value) {
-            $strValue = (string) $value;
-
-            $cleanKey = trim(str_replace([$open, $close], '', $key));
-            if ($cleanKey === '') {
-                continue;
-            }
-
-            // If the key originally contained delimiters or non-alphanumeric wrapper, preserve direct replacement
-            if ($key !== $cleanKey || ! preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
-                $expanded[$key] = $strValue;
-            }
-
-            $expanded[$open.' '.$cleanKey.' '.$close] = $strValue;
-            $expanded[$open.$cleanKey.$close] = $strValue;
-
-            // Standard case & string formatting modifiers
-            $modifiers = [
-                'studly' => Str::studly($strValue),
-                'camel' => Str::camel($strValue),
-                'kebab' => Str::kebab($strValue),
-                'snake' => Str::snake($strValue),
-                'lower' => Str::lower($strValue),
-                'upper' => Str::upper($strValue),
-                'title' => Str::title($strValue),
-                'plural' => Str::plural($strValue),
-                'singular' => Str::singular($strValue),
-            ];
-
-            foreach ($this->customModifiers as $customModName => $customCallback) {
-                $modifiers[$customModName] = (string) $customCallback($strValue);
-            }
-
-            foreach ($modifiers as $mod => $modVal) {
-                $expanded[$open.' '.$cleanKey.self::DEFAULT_MODIFIER_SEPARATOR.$mod.' '.$close] = $modVal;
-                $expanded[$open.$cleanKey.self::DEFAULT_MODIFIER_SEPARATOR.$mod.$close] = $modVal;
-                $expanded[$open.' '.$cleanKey.' '.self::DEFAULT_MODIFIER_SEPARATOR.' '.$mod.' '.$close] = $modVal;
-            }
-        }
-
-        uksort($expanded, fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-
-        return $expanded;
+        return $this->interpolator->resolveTokens($tokens, $openDelimiter, $closeDelimiter);
     }
 
     /**
@@ -457,7 +271,7 @@ class StubEngine
 
         $content = (string) $this->files->get($effectiveSource);
         $unresolved = [];
-        $rendered = $this->interpolate($content, $tokens, $openDelimiter, $closeDelimiter, $unresolved);
+        $rendered = $this->interpolator->interpolate($content, $tokens, $openDelimiter, $closeDelimiter, $unresolved);
 
         if ($strict && $unresolved !== []) {
             throw new InvalidArgumentException("Unresolved tokens in stub file [{$effectiveSource}]: ".implode(', ', $unresolved));
@@ -493,7 +307,7 @@ class StubEngine
         ?string $closeDelimiter = null,
         bool $strict = false,
     ): bool {
-        $this->ensureWithinTargetDirectory(dirname($targetFile), $targetFile);
+        $this->pathGuard->ensureWithinTargetDirectory(dirname($targetFile), $targetFile);
 
         if ($this->files->exists($targetFile) && ! $force) {
             return false;
@@ -541,55 +355,11 @@ class StubEngine
         ?string $closeDelimiter = null,
         bool $strict = false,
     ): ScaffoldResult {
-        if (! $this->files->isDirectory($sourceDir)) {
-            throw new InvalidArgumentException("Stubs source directory not found: [{$sourceDir}].");
-        }
-
-        $hasOverrideDir = $overrideDir !== null && $this->files->isDirectory($overrideDir);
-
-        /** @var array<string, array{sourcePath: string, isOverride: bool}> $stubsMap */
-        $stubsMap = [];
-
-        if ($hasOverrideDir && $strategy === OverrideStrategy::Replace) {
-            foreach ($this->files->allFiles($overrideDir) as $file) {
-                if (in_array($file->getFilename(), self::DEFAULT_IGNORED_FILES, true)) {
-                    continue;
-                }
-                $relPath = str_replace('\\', '/', $file->getRelativePathname());
-                $stubsMap[$relPath] = [
-                    'sourcePath' => $file->getPathname(),
-                    'isOverride' => true,
-                ];
-            }
-        } else {
-            foreach ($this->files->allFiles($sourceDir) as $file) {
-                if (in_array($file->getFilename(), self::DEFAULT_IGNORED_FILES, true)) {
-                    continue;
-                }
-                $relPath = str_replace('\\', '/', $file->getRelativePathname());
-                $stubsMap[$relPath] = [
-                    'sourcePath' => $file->getPathname(),
-                    'isOverride' => false,
-                ];
-            }
-
-            if ($hasOverrideDir) {
-                foreach ($this->files->allFiles($overrideDir) as $file) {
-                    if (in_array($file->getFilename(), self::DEFAULT_IGNORED_FILES, true)) {
-                        continue;
-                    }
-                    $relPath = str_replace('\\', '/', $file->getRelativePathname());
-                    $stubsMap[$relPath] = [
-                        'sourcePath' => $file->getPathname(),
-                        'isOverride' => true,
-                    ];
-                }
-            }
-        }
+        $stubsMap = $this->resolver->resolveStubsMap($sourceDir, $overrideDir, $strategy);
 
         // Resolve delimiters and merged tokens ONCE for the entire tree
-        [$open, $close] = $this->resolveDelimiters($openDelimiter, $closeDelimiter);
-        $mergedTokens = $this->getMergedTokens($tokens, $open, $close);
+        [$open, $close] = $this->interpolator->resolveDelimiters($openDelimiter, $closeDelimiter);
+        $mergedTokens = $this->interpolator->getMergedTokens($tokens, $open, $close);
 
         $createdFiles = [];
         $overwrittenFiles = [];
@@ -601,14 +371,14 @@ class StubEngine
 
         foreach ($stubsMap as $relPath => $stubInfo) {
             $isStub = $stubExtension !== '' && str_ends_with($relPath, $stubExtension);
-            $targetRelPath = $this->interpolateContent($relPath, $mergedTokens, $open, $close);
+            $targetRelPath = $this->interpolator->interpolateContent($relPath, $mergedTokens, $open, $close);
 
             if ($isStub) {
                 $targetRelPath = substr($targetRelPath, 0, -$extLen);
             }
 
             $destination = rtrim($targetDir, '/\\').'/'.$targetRelPath;
-            $this->ensureWithinTargetDirectory($targetDir, $destination);
+            $this->pathGuard->ensureWithinTargetDirectory($targetDir, $destination);
 
             $exists = $this->files->exists($destination);
 
@@ -634,7 +404,7 @@ class StubEngine
             if ($isStub) {
                 $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
                 $unresolved = [];
-                $renderedContent = $this->interpolateContent($rawContent, $mergedTokens, $open, $close, $unresolved);
+                $renderedContent = $this->interpolator->interpolateContent($rawContent, $mergedTokens, $open, $close, $unresolved);
 
                 if ($unresolved !== []) {
                     $unresolvedTokensMap[$targetRelPath] = $unresolved;

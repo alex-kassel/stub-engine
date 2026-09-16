@@ -60,7 +60,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
 
 ## Priority 2: Architecture, Modularity & SOLID Principles (Phase 2)
 
-### 2.1. Deconstruct the God Class (`StubEngine`) into Focused Collaborators (SRP)
+### 2.1. Deconstruct the God Class (`StubEngine`) into Focused Collaborators (SRP) [x] COMPLETED
 * **Problem**:
   The 488-line `StubEngine` class currently handles path traversal validation, string parsing and compilation, delimiter resolution, diagnostic scans, overlay/replace directory crawling, and filesystem writes. This violates the Single Responsibility Principle and complicates unit testing.
 * **Proposed Solution**:
@@ -110,7 +110,7 @@ This document outlines the architectural assessment, bottlenecks, anti-patterns,
       ->scaffold();
   ```
 
-### 3.3. `Macroable` Trait Integration
+### 3.3. `Macroable` Trait Integration [x] COMPLETED
 * **Problem**:
   Consumers cannot augment `StubEngine` with domain-specific shortcuts or macros without forking or wrapping the class.
 * **Proposed Solution**:

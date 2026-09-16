@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\Tests;
 
+use AlexKassel\StubEngine\Engines\Interpolator;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
+use AlexKassel\StubEngine\Resolvers\StubResolver;
 use AlexKassel\StubEngine\Services\StubEngine;
 use AlexKassel\StubEngine\StubEngineServiceProvider;
+use AlexKassel\StubEngine\Support\PathGuard;
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Filesystem\Filesystem;
@@ -697,5 +700,28 @@ class StubEngineTest extends TestCase
         $this->assertStringContainsString('WrapDouble: [ALERT!]', $rendered);
         $this->assertStringContainsString('Trim: clean', $rendered);
         $this->assertStringContainsString('ChainedWithParams: billing_items', $rendered);
+    }
+
+    public function test_stub_engine_is_macroable(): void
+    {
+        StubEngine::macro('generateBanner', function (string $title): string {
+            /** @var StubEngine $this */
+            return $this->interpolate('=== {{ title|upper }} ===', ['title' => $title]);
+        });
+
+        $engine = new StubEngine($this->files);
+        $result = $engine->generateBanner('welcome');
+
+        $this->assertSame('=== WELCOME ===', $result);
+    }
+
+    public function test_component_accessors(): void
+    {
+        $engine = new StubEngine($this->files);
+
+        $this->assertSame($this->files, $engine->filesystem());
+        $this->assertInstanceOf(Interpolator::class, $engine->interpolator());
+        $this->assertInstanceOf(StubResolver::class, $engine->resolver());
+        $this->assertInstanceOf(PathGuard::class, $engine->pathGuard());
     }
 }
