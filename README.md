@@ -52,7 +52,7 @@ Generators, module builders, manifest installers, and CLI scaffolding tools repe
 * **Configurable Delimiters & Zero-Trust Fallbacks:**
   * Globally customize placeholder delimiters (e.g. `<% %>` or `[[ ]]`) via `config/stub-engine.php` to eliminate syntax collisions with Blade (`{{ $var }}`), Vue, Jinja, or bash.
   * Override delimiters on a per-call basis at runtime.
-  * Zero-trust resilience: falls back gracefully to `StubEngine::DEFAULT_TOKEN_OPEN_DELIMITER` (`{{`) and `StubEngine::DEFAULT_TOKEN_CLOSE_DELIMITER` (`}}`) even if config is absent or empty.
+  * Zero-trust resilience: falls back gracefully to default delimiters (`{{` and `}}`) even if config is absent or empty.
 * **Global & Dynamic Tokens:**
   * Define application-wide global tokens (e.g. `company_name`, `year`, `author`) in `config/stub-engine.php`.
   * Runtime tokens seamlessly merge and take precedence over global tokens.

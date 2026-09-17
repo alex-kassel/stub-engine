@@ -29,8 +29,8 @@ While functional, this signature was error-prone, unwieldy, and brittle.
 ```php
 StubEngine::from($stubsDir)
     ->to($targetDir)
-    ->with(['module' => 'Billing'])
-    ->when($withAuth, fn (ScaffoldBuilder $b) => $b->token('has_auth', true))
+    ->withTokens(['module' => 'Billing'])
+    ->when($withAuth, fn (ScaffoldBuilder $b) => $b->withTokens(['has_auth' => true]))
     ->overlay($hostOverridesDir)
     ->force()
     ->scaffold();
@@ -38,13 +38,13 @@ StubEngine::from($stubsDir)
 
 ---
 
-## 2. Instantiation & Factory Entry Points
+## 2. Instantiation & Entry Points
 
-`ScaffoldBuilder` can be created through multiple convenient entry points:
+`ScaffoldBuilder` can be created through the Laravel Facade or via Dependency Injection:
 
-### Static Factory on Service Class
+### Via Laravel Facade
 ```php
-use AlexKassel\StubEngine\Services\StubEngine;
+use AlexKassel\StubEngine\Facades\StubEngine;
 
 // Start directory tree scaffolding
 $builder = StubEngine::from('/path/to/stubs');
@@ -53,19 +53,7 @@ $builder = StubEngine::from('/path/to/stubs');
 $builder = StubEngine::fromFile('/path/to/Class.php.stub');
 
 // Start blank builder
-$builder = StubEngine::builder();
-
-// Start with package convention auto-discovery
-$builder = StubEngine::forPackage('alex-kassel/billing');
-```
-
-### Via Laravel Facade
-```php
-use AlexKassel\StubEngine\Facades\StubEngine;
-
-StubEngine::from($stubsPath)
-    ->to(app_path('Domain/Billing'))
-    ->scaffold();
+$builder = StubEngine::newBuilder();
 ```
 
 ### Via Dependency Injection
@@ -78,7 +66,7 @@ class MakeModuleCommand extends Command
     {
         $engine->from(__DIR__ . '/../stubs')
             ->to(app_path('Modules/Billing'))
-            ->with(['name' => $this->argument('name')])
+            ->withTokens(['name' => $this->argument('name')])
             ->scaffold();
 
         return self::SUCCESS;
@@ -107,7 +95,7 @@ StubEngine::from(__DIR__ . '/../stubs')
 ```php
 StubEngine::fromFile(__DIR__ . '/../stubs/config.php.stub')
     ->toFile(config_path('my-package.php'))
-    ->with(['prefix' => 'api/v1'])
+    ->withTokens(['prefix' => 'api/v1'])
     ->scaffold();
 ```
 
@@ -115,19 +103,16 @@ StubEngine::fromFile(__DIR__ . '/../stubs/config.php.stub')
 
 ## 4. Passing Tokens
 
-Tokens can be passed in bulk or accumulated incrementally:
-
-* `with(array $tokens)` / `withTokens(array $tokens)`: Merges an associative array of key-value replacements.
-* `token(string $key, mixed $value)`: Sets or overwrites an individual token value.
+Tokens are passed as an associative array of key-value replacements using `withTokens(array $tokens)`. Repeated calls merge tokens:
 
 ```php
 StubEngine::from($sourceDir)
     ->to($targetDir)
-    ->with([
-        'module' => 'Order',
-        'table'  => 'orders',
+    ->withTokens([
+        'module'     => 'Order',
+        'table'      => 'orders',
+        'created_at' => now()->toIso8601String(),
     ])
-    ->token('created_at', now()->toIso8601String())
     ->scaffold();
 ```
 
@@ -140,7 +125,7 @@ StubEngine::from($sourceDir)
 ### `when(value, callback, defaultCallback)`
 ```php
 $builder->when($this->option('with-tests'), function (ScaffoldBuilder $b): void {
-    $b->token('include_tests', 'true');
+    $b->withTokens(['include_tests' => 'true']);
 });
 ```
 
@@ -162,7 +147,7 @@ use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
 
 ScaffoldBuilder::macro('forModule', function (string $moduleName): ScaffoldBuilder {
     /** @var ScaffoldBuilder $this */
-    return $this->with([
+    return $this->withTokens([
         'module'       => $moduleName,
         'module_snake' => str($moduleName)->snake()->toString(),
         'module_slug'  => str($moduleName)->kebab()->toString(),
@@ -246,3 +231,5 @@ This automatically inspects `stubs/vendor/alex-kassel/billing/configs`.
 * `strict(bool $strict = true)`: Throw an `InvalidArgumentException` if any unresolved placeholder remains (default: `false`).
 * `stubExtension(string $extension)`: Change the file extension stripped upon output (default: `'.stub'`).
 * `delimiters(string $open, string $close)`: Override token delimiters at runtime (e.g. `<%` and `%>`).
+* `onProgress(?callable $callback)`: Register a progress hook `fn (string $path, int $index, int $total)` for CLI progress bars.
+

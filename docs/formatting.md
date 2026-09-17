@@ -14,14 +14,14 @@ Instead of writing custom regular expressions or manual whitespace cleanup, `Stu
 
 ## 2. Usage in `ScaffoldBuilder`
 
-You can activate Pint formatting through `formatWithPint()` or its alias `format()`:
+You can activate Pint formatting through `formatWithPint()`:
 
 ```php
 use AlexKassel\StubEngine\Facades\StubEngine;
 
 $result = StubEngine::from(__DIR__ . '/../stubs')
     ->to(app_path('Domain/Billing'))
-    ->with(['module' => 'Invoice'])
+    ->withTokens(['module' => 'Invoice'])
     ->formatWithPint()
     ->scaffold();
 
@@ -92,7 +92,7 @@ StubEngine::from($stubs)
 `ScaffoldResult` provides dedicated helpers to inspect formatting status:
 
 ```php
-$result = StubEngine::from($source)->to($target)->format()->scaffold();
+$result = StubEngine::from($source)->to($target)->formatWithPint()->scaffold();
 
 // Check if Pint was executed
 $isClean = $result->isFormatted(); // bool

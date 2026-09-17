@@ -1,5 +1,6 @@
 {
     "name": "alex-kassel/stub-engine",
+    "version": "0.0.2",
     "description": "Hierarchical template and stub scaffolding engine with token interpolation and host overrides for PHP and Laravel",
     "keywords": [
         "laravel",

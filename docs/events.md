@@ -6,108 +6,120 @@
 
 ## 1. Available Events
 
-| Event | Class | Timing | Key Capabilities |
-| :--- | :--- | :--- | :--- |
-| **`FileScaffolding`** | `AlexKassel\StubEngine\Events\FileScaffolding` | Dispatched immediately **before** an individual file is written | Inspect metadata, modify content before writing, or cancel creation of specific files |
-| **`FileScaffolded`** | `AlexKassel\StubEngine\Events\FileScaffolded` | Dispatched immediately **after** an individual file has been written/copied | Update CLI progress bars, audit logging, trigger post-creation hooks |
-| **`TreeScaffolded`** | `AlexKassel\StubEngine\Events\TreeScaffolded` | Dispatched when the **entire tree** scaffolding finishes | Read complete audit summary via `ScaffoldResult`, print final reports |
+`StubEngine` employs a clean, two-event lifecycle separating directory tree scaffolding from individual file operations. Tree scaffolding dispatches coarse-grained lifecycle events, avoiding the overhead of firing thousands of micro-events during bulk file generation.
+
+| Event | Class | Scope | Timing | Key Capabilities |
+| :--- | :--- | :--- | :--- | :--- |
+| **`TreeScaffolding`** | `AlexKassel\StubEngine\Events\TreeScaffolding` | Tree Scaffolding | Dispatched **before** directory tree scaffolding begins | Pre-flight initialization, auditing paths and dry-run status |
+| **`TreeScaffolded`** | `AlexKassel\StubEngine\Events\TreeScaffolded` | Tree Scaffolding | Dispatched **after** directory tree scaffolding finishes | Complete audit summary via `ScaffoldResult`, logging, notifications |
+| **`FileScaffolding`** | `AlexKassel\StubEngine\Events\FileScaffolding` | Single File Scaffolding | Dispatched **before** a standalone file is written | Inspect metadata, modify content before writing, or cancel creation (`skip()`) |
+| **`FileScaffolded`** | `AlexKassel\StubEngine\Events\FileScaffolded` | Single File Scaffolding | Dispatched **after** a standalone file has been written | Post-creation hooks, audit logging |
 
 ---
 
 ## 2. Event Payloads & Properties
 
+### `TreeScaffolding`
+Dispatched once before tree scaffolding starts:
+* `string $sourceDir`: Source template directory.
+* `string $targetDir`: Target destination directory.
+* `?string $overrideDir`: Optional host override directory.
+* `bool $dryRun`: Whether execution is running in simulation mode.
+
+---
+
+### `TreeScaffolded`
+Dispatched once when directory tree scaffolding completes:
+* `ScaffoldResult $result`: Detailed DTO containing lists of `createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`, `rawCopiedFiles`, and `unresolvedTokens`.
+
+---
+
 ### `FileScaffolding`
-Dispatched before each stub file is rendered to disk or raw asset is copied:
-* `string $destination`: Full target destination path.
-* `string $relativePath`: Relative path within the scaffolding target directory.
+Dispatched before an individual standalone stub file is written via `scaffoldFile()`:
+* `string $destination`: Target destination path.
+* `string $relativePath`: Relative or basename path.
 * `string $content`: The interpolated content about to be written.
-* `bool $isOverride`: Whether the stub originates from a host override directory.
-* `bool $isRawCopy`: Whether this file is a raw binary/non-stub asset copied verbatim.
+* `bool $isOverride`: Whether the stub originates from a host override.
+* `bool $isRawCopy`: Whether this file is a raw non-stub asset.
 * `bool $dryRun`: Whether execution is in simulation mode.
-* `bool $shouldSkip`: If set to `true`, the engine skips writing this file.
+* `bool $shouldSkip`: If set to `true`, writing this file is cancelled.
 
 #### Methods:
-* `skip(): self`: Cancels creation of this file. The file is recorded in `$result->skippedFiles`.
-* `setContent(string $content): self`: Replaces the content before it is written to the filesystem.
+* `skip(): self`: Cancels creation of the file.
+* `setContent(string $content): self`: Replaces content before writing to disk.
 
 ---
 
 ### `FileScaffolded`
-Dispatched after an individual file has been successfully written or copied:
-* `string $destination`: Destination path of the generated file.
-* `string $relativePath`: Relative path within the target tree.
+Dispatched after an individual standalone file has been written via `scaffoldFile()`:
+* `string $destination`: Final destination path of the generated file.
+* `string $relativePath`: Relative or basename path.
 * `bool $isOverride`: Whether the file originated from a host override.
 * `bool $isRawCopy`: Whether the file was copied as a raw non-stub asset.
 * `bool $dryRun`: Whether execution was simulated.
 
 ---
 
-### `TreeScaffolded`
-Dispatched when directory tree scaffolding completes:
-* `ScaffoldResult $result`: Detailed DTO containing lists of `createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`, `rawCopiedFiles`, and `unresolvedTokens`.
-
----
-
 ## 3. Practical Use Cases & Examples
 
-### Use Case A: CLI Progress Bars in Artisan Commands
-When scaffolding a large directory tree, you can advance a Symfony/Laravel progress bar as each file is generated:
+### Use Case A: CLI Progress Bars via `onProgress()`
+Because tree scaffolding does not flood the global event dispatcher on every file, use the native `->onProgress()` callback on `ScaffoldBuilder` for console progress bars:
 
 ```php
-use AlexKassel\StubEngine\Events\FileScaffolded;
 use AlexKassel\StubEngine\Facades\StubEngine;
-use Illuminate\Support\Facades\Event;
+use Illuminate\Console\Command;
 
-public function handle(): int
+class MakeModuleCommand extends Command
 {
-    $bar = $this->output->createProgressBar();
+    public function handle(): int
+    {
+        $bar = $this->output->createProgressBar();
 
-    Event::listen(FileScaffolded::class, function (FileScaffolded $event) use ($bar): void {
-        $bar->advance();
-        $this->output->write("  [+] Generated {$event->relativePath}");
-    });
+        StubEngine::from(__DIR__ . '/../stubs')
+            ->to(app_path('Domain/Billing'))
+            ->withTokens(['name' => 'Invoice'])
+            ->onProgress(function (string $file, int $index, int $total) use ($bar): void {
+                $bar->setMaxSteps($total);
+                $bar->advance();
+            })
+            ->scaffold();
 
-    StubEngine::from(__DIR__ . '/../stubs')
-        ->to(app_path('Domain/Billing'))
-        ->with(['name' => 'Invoice'])
-        ->scaffold();
+        $bar->finish();
+        $this->newLine();
 
-    $bar->finish();
-
-    return self::SUCCESS;
+        return self::SUCCESS;
+    }
 }
 ```
 
 ---
 
-### Use Case B: Dynamically Injecting Headers or Licensing
-You can intercept files before they are written to prepend dynamic copyright headers:
+### Use Case B: Pre-Scaffolding Initialization via `TreeScaffolding`
+Execute pre-flight checks or log intent before any disk operations begin:
 
 ```php
-use AlexKassel\StubEngine\Events\FileScaffolding;
+use AlexKassel\StubEngine\Events\TreeScaffolding;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 
-Event::listen(FileScaffolding::class, function (FileScaffolding $event): void {
-    if (str_ends_with($event->relativePath, '.php')) {
-        $header = "<?php\n\n/**\n * (c) " . date('Y') . " Acme Corp. All rights reserved.\n */\n";
-        $modifiedContent = preg_replace('/^<\?php\s*/', $header, $event->content);
-        $event->setContent($modifiedContent);
-    }
+Event::listen(TreeScaffolding::class, function (TreeScaffolding $event): void {
+    Log::info("Starting scaffolding from {$event->sourceDir} to {$event->targetDir}");
 });
 ```
 
 ---
 
-### Use Case C: Conditional File Filtering (Skipping Files)
-You can dynamically skip specific files based on runtime flags or environmental checks:
+### Use Case C: Dynamically Injecting Headers in Single-File Scaffolding
+Intercept standalone files before they are written:
 
 ```php
 use AlexKassel\StubEngine\Events\FileScaffolding;
 use Illuminate\Support\Facades\Event;
 
 Event::listen(FileScaffolding::class, function (FileScaffolding $event): void {
-    if ($event->relativePath === 'tests/Feature/SmokeTest.php' && ! config('app.include_smoke_tests')) {
-        $event->skip();
+    if (str_ends_with($event->destination, '.php')) {
+        $header = "<?php\n\n/**\n * (c) " . date('Y') . " Acme Corp.\n */\n";
+        $event->setContent(preg_replace('/^<\?php\s*/', $header, $event->content));
     }
 });
 ```
