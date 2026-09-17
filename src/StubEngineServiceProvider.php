@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine;
 
+use AlexKassel\StubEngine\Formatters\PintFormatter;
 use AlexKassel\StubEngine\Services\StubEngine;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\ServiceProvider;
 
@@ -21,19 +23,14 @@ class StubEngineServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        if ($this->app->bound('config')) {
-            $this->mergeConfigFrom(self::CONFIG_PATH, self::CONFIG_KEY);
-        }
+        $this->mergeConfigFrom(self::CONFIG_PATH, self::CONFIG_KEY);
 
         $this->app->singleton(StubEngine::class, function ($app): StubEngine {
-            $files = $app->bound('files') ? $app->make('files') : new Filesystem;
-            $config = $app->bound('config') ? (array) $app['config']->get(self::CONFIG_KEY, []) : [];
-            $events = $app->bound('events') ? $app->make('events') : null;
-
             return new StubEngine(
-                files: $files,
-                config: $config,
-                events: $events,
+                files: $app->make(Filesystem::class),
+                config: (array) config(self::CONFIG_KEY, []),
+                events: $app->make(Dispatcher::class),
+                formatter: $app->make(PintFormatter::class),
             );
         });
     }

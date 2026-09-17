@@ -43,46 +43,42 @@ class StubResolver
 
         $hasOverrideDir = $overrideDir !== null && $this->files->isDirectory($overrideDir);
 
-        /** @var array<string, array{sourcePath: string, isOverride: bool}> $stubsMap */
-        $stubsMap = [];
-
         if ($hasOverrideDir && $strategy === OverrideStrategy::Replace) {
-            foreach ($this->files->allFiles($overrideDir) as $file) {
-                if (in_array($file->getFilename(), $ignoredFiles, true)) {
-                    continue;
-                }
-                $relPath = str_replace('\\', '/', $file->getRelativePathname());
-                $stubsMap[$relPath] = [
-                    'sourcePath' => $file->getPathname(),
-                    'isOverride' => true,
-                ];
-            }
-        } else {
-            foreach ($this->files->allFiles($sourceDir) as $file) {
-                if (in_array($file->getFilename(), $ignoredFiles, true)) {
-                    continue;
-                }
-                $relPath = str_replace('\\', '/', $file->getRelativePathname());
-                $stubsMap[$relPath] = [
-                    'sourcePath' => $file->getPathname(),
-                    'isOverride' => false,
-                ];
-            }
+            return $this->crawlDirectory($overrideDir, isOverride: true, ignoredFiles: $ignoredFiles);
+        }
 
-            if ($hasOverrideDir) {
-                foreach ($this->files->allFiles($overrideDir) as $file) {
-                    if (in_array($file->getFilename(), $ignoredFiles, true)) {
-                        continue;
-                    }
-                    $relPath = str_replace('\\', '/', $file->getRelativePathname());
-                    $stubsMap[$relPath] = [
-                        'sourcePath' => $file->getPathname(),
-                        'isOverride' => true,
-                    ];
-                }
-            }
+        $stubsMap = $this->crawlDirectory($sourceDir, isOverride: false, ignoredFiles: $ignoredFiles);
+
+        if ($hasOverrideDir) {
+            $overrideMap = $this->crawlDirectory($overrideDir, isOverride: true, ignoredFiles: $ignoredFiles);
+            $stubsMap = array_merge($stubsMap, $overrideMap);
         }
 
         return $stubsMap;
+    }
+
+    /**
+     * Crawl a directory and build a relative-to-source file mapping.
+     *
+     * @param  array<int, string>  $ignoredFiles
+     * @return array<string, array{sourcePath: string, isOverride: bool}>
+     */
+    protected function crawlDirectory(string $directory, bool $isOverride, array $ignoredFiles): array
+    {
+        $map = [];
+
+        foreach ($this->files->allFiles($directory) as $file) {
+            if (in_array($file->getFilename(), $ignoredFiles, true)) {
+                continue;
+            }
+
+            $relPath = str_replace('\\', '/', $file->getRelativePathname());
+            $map[$relPath] = [
+                'sourcePath' => $file->getPathname(),
+                'isOverride' => $isOverride,
+            ];
+        }
+
+        return $map;
     }
 }

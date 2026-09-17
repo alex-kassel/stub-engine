@@ -16,16 +16,11 @@ class PintFormatter
 
     public const DEFAULT_TIMEOUT = 60;
 
-    protected ProcessFactory $process;
+    public const DEFAULT_CHUNK_SIZE = 50;
 
-    public function __construct(?ProcessFactory $process = null)
-    {
-        $this->process = $process ?? (
-            function_exists('app') && app()->bound('process')
-                ? app('process')
-                : new ProcessFactory
-        );
-    }
+    public function __construct(
+        protected ProcessFactory $process = new ProcessFactory,
+    ) {}
 
     /**
      * Access the underlying process factory.
@@ -54,11 +49,9 @@ class PintFormatter
             return file_exists($customBinary) ? $customBinary : null;
         }
 
-        if (function_exists('base_path') && function_exists('app') && method_exists(app(), 'basePath')) {
-            $basePath = base_path(self::DEFAULT_PINT_PATH);
-            if (file_exists($basePath)) {
-                return $basePath;
-            }
+        $basePath = base_path(self::DEFAULT_PINT_PATH);
+        if (file_exists($basePath)) {
+            return $basePath;
         }
 
         if (file_exists(self::DEFAULT_PINT_PATH)) {
@@ -84,12 +77,11 @@ class PintFormatter
         bool $strict = self::DEFAULT_STRICT,
         ?string $customBinary = null,
     ): array {
-        $phpFiles = array_values(array_filter(
-            $files,
-            static fn (string $path): bool => str_ends_with($path, '.php') && file_exists($path)
-        ));
+        $chunks = collect($files)
+            ->filter(static fn (string $path): bool => str_ends_with($path, '.php') && file_exists($path))
+            ->chunk(self::DEFAULT_CHUNK_SIZE);
 
-        if ($phpFiles === []) {
+        if ($chunks->isEmpty()) {
             return [
                 'formatted' => false,
                 'warnings' => [],
@@ -113,24 +105,28 @@ class PintFormatter
             ];
         }
 
-        $processResult = $this->process->timeout(self::DEFAULT_TIMEOUT)->run([$binary, ...$phpFiles]);
+        $warnings = [];
+        $allSuccessful = true;
 
-        if (! $processResult->successful()) {
-            $errorMsg = "Laravel Pint formatting exited with code {$processResult->exitCode()}: ".trim($processResult->errorOutput());
+        foreach ($chunks as $chunk) {
+            $processResult = $this->process->timeout(self::DEFAULT_TIMEOUT)->run([$binary, ...$chunk->all()]);
 
-            if ($strict) {
-                throw new RuntimeException($errorMsg);
+            if (! $processResult->successful()) {
+                $allSuccessful = false;
+                $errorMsg = "Laravel Pint formatting exited with code {$processResult->exitCode()}: ".trim($processResult->errorOutput());
+
+                if ($strict) {
+                    throw new RuntimeException($errorMsg);
+                }
+
+                $warnings[] = $errorMsg;
+                break;
             }
-
-            return [
-                'formatted' => false,
-                'warnings' => [$errorMsg],
-            ];
         }
 
         return [
-            'formatted' => true,
-            'warnings' => [],
+            'formatted' => $allSuccessful,
+            'warnings' => $warnings,
         ];
     }
 }

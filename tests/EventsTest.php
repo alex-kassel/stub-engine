@@ -7,10 +7,10 @@ namespace AlexKassel\StubEngine\Tests;
 use AlexKassel\StubEngine\Events\FileScaffolded;
 use AlexKassel\StubEngine\Events\FileScaffolding;
 use AlexKassel\StubEngine\Events\TreeScaffolded;
+use AlexKassel\StubEngine\Events\TreeScaffolding;
 use AlexKassel\StubEngine\Services\StubEngine;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Filesystem\Filesystem;
-use PHPUnit\Framework\TestCase;
 
 class EventsTest extends TestCase
 {
@@ -43,30 +43,27 @@ class EventsTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_file_scaffolding_and_file_scaffolded_events_are_dispatched(): void
+    public function test_tree_scaffolding_and_tree_scaffolded_events_are_dispatched(): void
     {
         $sourceDir = $this->tempDir.'/source';
         $targetDir = $this->tempDir.'/target';
         $this->files->ensureDirectoryExists($sourceDir);
         $this->files->put($sourceDir.'/test.txt.stub', 'Hello {{ name }}');
 
-        $scaffoldingFired = false;
-        $scaffoldedFired = false;
+        $treeScaffoldingFired = false;
+        $treeScaffoldedFired = false;
 
-        $this->events->listen(FileScaffolding::class, function (FileScaffolding $event) use (&$scaffoldingFired): void {
-            $scaffoldingFired = true;
-            $this->assertSame('test.txt', $event->relativePath);
-            $this->assertSame('Hello World', $event->content);
-            $this->assertFalse($event->isOverride);
-            $this->assertFalse($event->isRawCopy);
+        $this->events->listen(TreeScaffolding::class, function (TreeScaffolding $event) use ($sourceDir, $targetDir, &$treeScaffoldingFired): void {
+            $treeScaffoldingFired = true;
+            $this->assertSame($sourceDir, $event->sourceDir);
+            $this->assertSame($targetDir, $event->targetDir);
             $this->assertFalse($event->dryRun);
         });
 
-        $this->events->listen(FileScaffolded::class, function (FileScaffolded $event) use (&$scaffoldedFired): void {
-            $scaffoldedFired = true;
-            $this->assertSame('test.txt', $event->relativePath);
-            $this->assertFalse($event->isOverride);
-            $this->assertFalse($event->isRawCopy);
+        $this->events->listen(TreeScaffolded::class, function (TreeScaffolded $event) use (&$treeScaffoldedFired): void {
+            $treeScaffoldedFired = true;
+            $this->assertCount(1, $event->result->createdFiles);
+            $this->assertContains('test.txt', $event->result->createdFiles);
         });
 
         $this->engine->scaffoldTree(
@@ -75,80 +72,38 @@ class EventsTest extends TestCase
             tokens: ['name' => 'World'],
         );
 
-        $this->assertTrue($scaffoldingFired);
-        $this->assertTrue($scaffoldedFired);
+        $this->assertTrue($treeScaffoldingFired);
+        $this->assertTrue($treeScaffoldedFired);
         $this->assertSame('Hello World', $this->files->get($targetDir.'/test.txt'));
     }
 
-    public function test_file_scaffolding_allows_mutating_content_before_writing(): void
+    public function test_scaffold_tree_on_progress_callback_is_invoked_for_each_file(): void
     {
         $sourceDir = $this->tempDir.'/source';
         $targetDir = $this->tempDir.'/target';
         $this->files->ensureDirectoryExists($sourceDir);
-        $this->files->put($sourceDir.'/header.txt.stub', 'Original Content: {{ var }}');
+        $this->files->put($sourceDir.'/file1.txt.stub', '1');
+        $this->files->put($sourceDir.'/file2.txt.stub', '2');
+        $this->files->put($sourceDir.'/raw.bin', 'RAW');
 
-        $this->events->listen(FileScaffolding::class, function (FileScaffolding $event): void {
-            $event->setContent("// LICENSE: MIT\n".$event->content);
-        });
+        $progressCalls = [];
 
-        $this->engine->scaffoldTree(
-            sourceDir: $sourceDir,
-            targetDir: $targetDir,
-            tokens: ['var' => '123'],
-        );
+        $this->engine->from($sourceDir)
+            ->to($targetDir)
+            ->onProgress(function (string $relativePath, int $index, int $total) use (&$progressCalls): void {
+                $progressCalls[] = [
+                    'file' => $relativePath,
+                    'index' => $index,
+                    'total' => $total,
+                ];
+            })
+            ->scaffold();
 
-        $this->assertSame("// LICENSE: MIT\nOriginal Content: 123", $this->files->get($targetDir.'/header.txt'));
-    }
-
-    public function test_file_scaffolding_allows_skipping_specific_files(): void
-    {
-        $sourceDir = $this->tempDir.'/source';
-        $targetDir = $this->tempDir.'/target';
-        $this->files->ensureDirectoryExists($sourceDir);
-        $this->files->put($sourceDir.'/keep.txt.stub', 'Keep this');
-        $this->files->put($sourceDir.'/skip.txt.stub', 'Skip this');
-
-        $this->events->listen(FileScaffolding::class, function (FileScaffolding $event): void {
-            if ($event->relativePath === 'skip.txt') {
-                $event->skip();
-            }
-        });
-
-        $result = $this->engine->scaffoldTree(
-            sourceDir: $sourceDir,
-            targetDir: $targetDir,
-            tokens: [],
-        );
-
-        $this->assertFileExists($targetDir.'/keep.txt');
-        $this->assertFileDoesNotExist($targetDir.'/skip.txt');
-        $this->assertContains('skip.txt', $result->skippedFiles);
-        $this->assertContains('keep.txt', $result->createdFiles);
-    }
-
-    public function test_tree_scaffolded_event_is_dispatched_with_result(): void
-    {
-        $sourceDir = $this->tempDir.'/source';
-        $targetDir = $this->tempDir.'/target';
-        $this->files->ensureDirectoryExists($sourceDir);
-        $this->files->put($sourceDir.'/file1.txt.stub', 'A');
-        $this->files->put($sourceDir.'/file2.txt.stub', 'B');
-
-        $treeEventDispatched = false;
-
-        $this->events->listen(TreeScaffolded::class, function (TreeScaffolded $event) use (&$treeEventDispatched): void {
-            $treeEventDispatched = true;
-            $this->assertCount(2, $event->result->createdFiles);
-            $this->assertFalse($event->result->dryRun);
-        });
-
-        $this->engine->scaffoldTree(
-            sourceDir: $sourceDir,
-            targetDir: $targetDir,
-            tokens: [],
-        );
-
-        $this->assertTrue($treeEventDispatched);
+        $this->assertCount(3, $progressCalls);
+        $this->assertSame(3, $progressCalls[0]['total']);
+        $this->assertSame(1, $progressCalls[0]['index']);
+        $this->assertSame(2, $progressCalls[1]['index']);
+        $this->assertSame(3, $progressCalls[2]['index']);
     }
 
     public function test_single_file_scaffolding_dispatches_events(): void

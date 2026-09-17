@@ -8,7 +8,6 @@ use AlexKassel\StubEngine\Exceptions\FormatterNotFoundException;
 use AlexKassel\StubEngine\Formatters\PintFormatter;
 use AlexKassel\StubEngine\Services\StubEngine;
 use Illuminate\Filesystem\Filesystem;
-use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 class PintFormatterTest extends TestCase
@@ -172,7 +171,7 @@ class PintFormatterTest extends TestCase
 
         $result = $engine->from($sourceDir)
             ->to($targetDir)
-            ->token('name', 'Invoice')
+            ->withTokens(['name' => 'Invoice'])
             ->formatWithPint(enabled: true, strict: true, binary: $mockBinary)
             ->scaffold();
 
@@ -197,5 +196,37 @@ class PintFormatterTest extends TestCase
         $this->assertFalse($result->isFormatted());
         $this->assertTrue($result->hasWarnings());
         $this->assertStringContainsString('Laravel Pint binary not found', $result->warnings[0]);
+    }
+
+    public function test_format_batches_files_in_chunks_to_prevent_cli_argument_overflow(): void
+    {
+        $mockBinary = $this->tempDir.'/fake-pint';
+        $this->files->put($mockBinary, '#!/bin/sh');
+        chmod($mockBinary, 0755);
+
+        $filePaths = [];
+        for ($i = 1; $i <= 55; $i++) {
+            $path = "{$this->tempDir}/File{$i}.php";
+            $this->files->put($path, "<?php class File{$i} {}");
+            $filePaths[] = $path;
+        }
+
+        $ranProcesses = [];
+        $this->formatter->process()->fake([
+            '*'.$mockBinary.'*' => function ($process) use (&$ranProcesses) {
+                $ranProcesses[] = $process;
+
+                return $this->formatter->process()->result('Batch formatted', exitCode: 0);
+            },
+        ]);
+
+        $result = $this->formatter->format(
+            files: $filePaths,
+            strict: true,
+            customBinary: $mockBinary,
+        );
+
+        $this->assertTrue($result['formatted']);
+        $this->assertCount(2, $ranProcesses);
     }
 }

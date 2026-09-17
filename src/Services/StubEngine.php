@@ -11,15 +11,17 @@ use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\Events\FileScaffolded;
 use AlexKassel\StubEngine\Events\FileScaffolding;
 use AlexKassel\StubEngine\Events\TreeScaffolded;
+use AlexKassel\StubEngine\Events\TreeScaffolding;
 use AlexKassel\StubEngine\Formatters\PintFormatter;
 use AlexKassel\StubEngine\Resolvers\StubResolver;
-use AlexKassel\StubEngine\Support\PathGuard;
 use BadMethodCallException;
 use Closure;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Traits\Macroable;
 use InvalidArgumentException;
+use League\Flysystem\PathTraversalDetected;
+use League\Flysystem\WhitespacePathNormalizer;
 use RuntimeException;
 use Throwable;
 
@@ -35,45 +37,11 @@ class StubEngine
 
     public const DEFAULT_FORMAT_STRICT = false;
 
-    public const DEFAULT_TOKEN_OPEN_DELIMITER = Interpolator::DEFAULT_TOKEN_OPEN_DELIMITER;
-
-    public const DEFAULT_TOKEN_CLOSE_DELIMITER = Interpolator::DEFAULT_TOKEN_CLOSE_DELIMITER;
-
-    public const DEFAULT_MODIFIER_SEPARATOR = Interpolator::DEFAULT_MODIFIER_SEPARATOR;
-
-    public const DEFAULT_DATE_FORMAT = Interpolator::DEFAULT_DATE_FORMAT;
-
-    public const DEFAULT_LIMIT_LENGTH = Interpolator::DEFAULT_LIMIT_LENGTH;
-
-    public const DEFAULT_LIMIT_END = Interpolator::DEFAULT_LIMIT_END;
-
-    public const CONFIG_DELIMITERS_KEY = Interpolator::CONFIG_DELIMITERS_KEY;
-
-    public const CONFIG_OPEN_DELIMITER_KEY = Interpolator::CONFIG_OPEN_DELIMITER_KEY;
-
-    public const CONFIG_CLOSE_DELIMITER_KEY = Interpolator::CONFIG_CLOSE_DELIMITER_KEY;
-
-    public const CONFIG_GLOBAL_TOKENS_KEY = Interpolator::CONFIG_GLOBAL_TOKENS_KEY;
-
-    public const CONFIG_LEGACY_OPEN_KEY = Interpolator::CONFIG_LEGACY_OPEN_KEY;
-
-    public const CONFIG_LEGACY_CLOSE_KEY = Interpolator::CONFIG_LEGACY_CLOSE_KEY;
-
-    public const CONFIG_LEGACY_GLOBAL_TOKENS_KEY = Interpolator::CONFIG_LEGACY_GLOBAL_TOKENS_KEY;
-
-    public const EMPTY_STRING_FALLBACK = Interpolator::EMPTY_STRING_FALLBACK;
-
-    public const EMPTY_ARRAY_FALLBACK = Interpolator::EMPTY_ARRAY_FALLBACK;
-
-    public const DEFAULT_IGNORED_FILES = StubResolver::DEFAULT_IGNORED_FILES;
-
     protected Filesystem $files;
 
     protected Interpolator $interpolator;
 
     protected StubResolver $resolver;
-
-    protected PathGuard $pathGuard;
 
     protected ?Dispatcher $events;
 
@@ -84,7 +52,6 @@ class StubEngine
      * @param  array<string, mixed>  $config  Stub engine configuration array
      * @param  Interpolator|null  $interpolator  Token interpolation engine
      * @param  StubResolver|null  $resolver  Stub discovery and overlay resolver
-     * @param  PathGuard|null  $pathGuard  Target directory containment validator
      * @param  Dispatcher|null  $events  Laravel event dispatcher
      * @param  PintFormatter|null  $formatter  Laravel Pint code formatter service
      */
@@ -93,14 +60,12 @@ class StubEngine
         protected array $config = [],
         ?Interpolator $interpolator = null,
         ?StubResolver $resolver = null,
-        ?PathGuard $pathGuard = null,
         ?Dispatcher $events = null,
         ?PintFormatter $formatter = null,
     ) {
         $this->files = $files ?? new Filesystem;
         $this->interpolator = $interpolator ?? new Interpolator($this->config);
         $this->resolver = $resolver ?? new StubResolver($this->files);
-        $this->pathGuard = $pathGuard ?? new PathGuard;
         $this->events = $events;
         $this->formatter = $formatter ?? new PintFormatter;
     }
@@ -114,43 +79,23 @@ class StubEngine
     }
 
     /**
-     * Create a new fluent ScaffoldBuilder instance resolved from the container or fresh.
+     * Start tree scaffolding from a source directory.
      */
-    public static function builder(): ScaffoldBuilder
+    public function from(string $sourceDir): ScaffoldBuilder
     {
-        $engine = function_exists('app') && app()->bound(self::class)
-            ? app(self::class)
-            : new self;
-
-        return $engine->newBuilder();
+        return $this->newBuilder()->from($sourceDir);
     }
 
     /**
-     * Fluent entry point: start tree scaffolding from a source directory.
+     * Start single-file scaffolding from a source file.
      */
-    public static function from(string $sourceDir): ScaffoldBuilder
+    public function fromFile(string $sourceFile): ScaffoldBuilder
     {
-        return static::builder()->from($sourceDir);
+        return $this->newBuilder()->fromFile($sourceFile);
     }
 
     /**
-     * Fluent entry point: start single-file scaffolding from a source file.
-     */
-    public static function fromFile(string $sourceFile): ScaffoldBuilder
-    {
-        return static::builder()->fromFile($sourceFile);
-    }
-
-    /**
-     * Fluent entry point: auto-discover package overrides from host conventions.
-     */
-    public static function forPackage(string $package, ?string $subpath = null): ScaffoldBuilder
-    {
-        return static::builder()->forPackage($package, $subpath);
-    }
-
-    /**
-     * Dynamically handle calls to the class or forward to ScaffoldBuilder.
+     * Dynamically handle calls to custom macros.
      *
      * @param  array<int, mixed>  $parameters
      *
@@ -170,10 +115,6 @@ class StubEngine
             }
 
             return $macro(...$parameters);
-        }
-
-        if (method_exists(ScaffoldBuilder::class, $method)) {
-            return $this->newBuilder()->$method(...$parameters);
         }
 
         throw new BadMethodCallException(sprintf(
@@ -206,14 +147,6 @@ class StubEngine
     }
 
     /**
-     * Access the underlying PathGuard instance.
-     */
-    public function pathGuard(): PathGuard
-    {
-        return $this->pathGuard;
-    }
-
-    /**
      * Access the underlying Laravel Event Dispatcher instance.
      */
     public function events(): ?Dispatcher
@@ -240,15 +173,11 @@ class StubEngine
     }
 
     /**
-     * Dispatch an event through the configured dispatcher or global helper.
+     * Dispatch an event through the configured dispatcher.
      */
     public function dispatchEvent(object $event): void
     {
-        if ($this->events !== null) {
-            $this->events->dispatch($event);
-        } elseif (function_exists('app') && app()->bound('events')) {
-            app('events')->dispatch($event);
-        }
+        $this->events?->dispatch($event);
     }
 
     /**
@@ -264,16 +193,6 @@ class StubEngine
     }
 
     /**
-     * Validate that a destination path stays strictly within the target directory.
-     *
-     * @throws InvalidArgumentException
-     */
-    public function ensureWithinTargetDirectory(string $targetDir, string $destination): void
-    {
-        $this->pathGuard->ensureWithinTargetDirectory($targetDir, $destination);
-    }
-
-    /**
      * Scan content and return any unresolved token placeholders.
      *
      * @return array<int, string>
@@ -284,66 +203,6 @@ class StubEngine
         ?string $closeDelimiter = null,
     ): array {
         return $this->interpolator->findUnresolvedTokens($content, $openDelimiter, $closeDelimiter);
-    }
-
-    /**
-     * Resolve the effective open and close delimiters just-in-time.
-     *
-     * @return array{0: string, 1: string}
-     */
-    public function resolveDelimiters(?string $open = null, ?string $close = null): array
-    {
-        return $this->interpolator->resolveDelimiters($open, $close);
-    }
-
-    /**
-     * Merge global config tokens with runtime tokens and normalize keys for interpolation.
-     *
-     * @param  array<string, string>  $tokens
-     * @return array<string, string>
-     */
-    public function getMergedTokens(array $tokens, ?string $open = null, ?string $close = null): array
-    {
-        return $this->interpolator->getMergedTokens($tokens, $open, $close);
-    }
-
-    /**
-     * Single-pass regex interpolation supporting flexible whitespace, modifier chaining,
-     * parameterized modifier directives, and Blade verbatim escape prefixes (@{{).
-     *
-     * @param  string  $content  Template content or file/directory path
-     * @param  array<string, string>  $mergedTokens  Normalized token replacements
-     * @param  string  $open  Effective open delimiter
-     * @param  string  $close  Effective close delimiter
-     * @param  array<int, string>|null  $unresolved  Optional output reference for unresolved placeholders
-     */
-    public function interpolateContent(
-        string $content,
-        array $mergedTokens,
-        string $open,
-        string $close,
-        ?array &$unresolved = null,
-    ): string {
-        return $this->interpolator->interpolateContent($content, $mergedTokens, $open, $close, $unresolved);
-    }
-
-    /**
-     * Apply a single modifier directive (with optional parameters) to a string value.
-     */
-    public function applyModifier(string $value, string $modifierDirective): string
-    {
-        return $this->interpolator->applyModifier($value, $modifierDirective);
-    }
-
-    /**
-     * Interpolate token placeholders using a pre-compiled replacement dictionary.
-     *
-     * @param  string  $content  Template content or file/directory path
-     * @param  array<string, string>  $compiledTokens  Pre-compiled replacements sorted by key length
-     */
-    public function interpolateWithMap(string $content, array $compiledTokens): string
-    {
-        return $this->interpolator->interpolateWithMap($content, $compiledTokens);
     }
 
     /**
@@ -365,21 +224,6 @@ class StubEngine
         ?array &$unresolved = null,
     ): string {
         return $this->interpolator->interpolate($content, $tokens, $openDelimiter, $closeDelimiter, $unresolved);
-    }
-
-    /**
-     * Resolve and expand token placeholders with case and formatting modifiers,
-     * merging global config tokens and sorting by key length in descending order.
-     *
-     * @param  array<string, string>  $tokens
-     * @return array<string, string>
-     */
-    public function resolveTokens(
-        array $tokens,
-        ?string $openDelimiter = null,
-        ?string $closeDelimiter = null,
-    ): array {
-        return $this->interpolator->resolveTokens($tokens, $openDelimiter, $closeDelimiter);
     }
 
     /**
@@ -449,8 +293,10 @@ class StubEngine
         bool $formatWithPint = self::DEFAULT_FORMAT_WITH_PINT,
         bool $formatStrict = self::DEFAULT_FORMAT_STRICT,
         ?string $pintBinary = null,
+        ?string $targetDir = null,
     ): bool {
-        $this->pathGuard->ensureWithinTargetDirectory(dirname($targetFile), $targetFile);
+        $boundaryDir = $targetDir ?? $this->resolveTargetDirectory($targetFile);
+        $this->ensureWithinTargetDirectory($boundaryDir, $targetFile);
 
         if ($this->files->exists($targetFile) && ! $force) {
             return false;
@@ -475,8 +321,7 @@ class StubEngine
         }
 
         if (! $dryRun) {
-            $this->files->ensureDirectoryExists(dirname($targetFile));
-            $this->files->put($targetFile, $scaffoldingEvent->content);
+            $this->putFile($targetFile, $scaffoldingEvent->content);
 
             if ($formatWithPint) {
                 $this->formatter->format([$targetFile], $formatStrict, $pintBinary);
@@ -528,7 +373,15 @@ class StubEngine
         bool $formatWithPint = self::DEFAULT_FORMAT_WITH_PINT,
         bool $formatStrict = self::DEFAULT_FORMAT_STRICT,
         ?string $pintBinary = null,
+        ?callable $onProgress = null,
     ): ScaffoldResult {
+        $this->dispatchEvent(new TreeScaffolding(
+            sourceDir: $sourceDir,
+            targetDir: $targetDir,
+            overrideDir: $overrideDir,
+            dryRun: $dryRun,
+        ));
+
         $stubsMap = $this->resolver->resolveStubsMap($sourceDir, $overrideDir, $strategy);
 
         // Resolve delimiters and merged tokens ONCE for the entire tree
@@ -542,8 +395,11 @@ class StubEngine
         $rawCopiedFiles = [];
         $unresolvedTokensMap = [];
         $extLen = strlen($stubExtension);
+        $totalFiles = count($stubsMap);
+        $currentIndex = 0;
 
         foreach ($stubsMap as $relPath => $stubInfo) {
+            $currentIndex++;
             $isStub = $stubExtension !== '' && str_ends_with($relPath, $stubExtension);
             $targetRelPath = $this->interpolator->interpolateContent($relPath, $mergedTokens, $open, $close);
 
@@ -552,7 +408,7 @@ class StubEngine
             }
 
             $destination = rtrim($targetDir, '/\\').'/'.$targetRelPath;
-            $this->pathGuard->ensureWithinTargetDirectory($targetDir, $destination);
+            $this->ensureWithinTargetDirectory($targetDir, $destination);
 
             $exists = $this->files->exists($destination);
 
@@ -562,7 +418,21 @@ class StubEngine
                     $overrideFiles[] = $targetRelPath;
                 }
 
+                if ($onProgress !== null) {
+                    $onProgress($targetRelPath, $currentIndex, $totalFiles);
+                }
+
                 continue;
+            }
+
+            if ($stubInfo['isOverride']) {
+                $overrideFiles[] = $targetRelPath;
+            }
+
+            if ($exists) {
+                $overwrittenFiles[] = $targetRelPath;
+            } else {
+                $createdFiles[] = $targetRelPath;
             }
 
             if ($isStub) {
@@ -577,96 +447,20 @@ class StubEngine
                     }
                 }
 
-                $scaffoldingEvent = new FileScaffolding(
-                    destination: $destination,
-                    relativePath: $targetRelPath,
-                    content: $renderedContent,
-                    isOverride: $stubInfo['isOverride'],
-                    isRawCopy: false,
-                    dryRun: $dryRun,
-                );
-
-                $this->dispatchEvent($scaffoldingEvent);
-
-                if ($scaffoldingEvent->shouldSkip) {
-                    $skippedFiles[] = $targetRelPath;
-                    if ($stubInfo['isOverride']) {
-                        $overrideFiles[] = $targetRelPath;
-                    }
-
-                    continue;
-                }
-
-                if ($exists) {
-                    $overwrittenFiles[] = $targetRelPath;
-                } else {
-                    $createdFiles[] = $targetRelPath;
-                }
-
-                if ($stubInfo['isOverride']) {
-                    $overrideFiles[] = $targetRelPath;
-                }
-
                 if (! $dryRun) {
-                    $this->files->ensureDirectoryExists(dirname($destination));
-                    $this->files->put($destination, $scaffoldingEvent->content);
+                    $this->putFile($destination, $renderedContent);
                 }
-
-                $this->dispatchEvent(new FileScaffolded(
-                    destination: $destination,
-                    relativePath: $targetRelPath,
-                    isOverride: $stubInfo['isOverride'],
-                    isRawCopy: false,
-                    dryRun: $dryRun,
-                ));
             } else {
-                // Raw asset: copy directly without text replacement
-                $rawContent = (string) $this->files->get($stubInfo['sourcePath']);
-
-                $scaffoldingEvent = new FileScaffolding(
-                    destination: $destination,
-                    relativePath: $targetRelPath,
-                    content: $rawContent,
-                    isOverride: $stubInfo['isOverride'],
-                    isRawCopy: true,
-                    dryRun: $dryRun,
-                );
-
-                $this->dispatchEvent($scaffoldingEvent);
-
-                if ($scaffoldingEvent->shouldSkip) {
-                    $skippedFiles[] = $targetRelPath;
-                    if ($stubInfo['isOverride']) {
-                        $overrideFiles[] = $targetRelPath;
-                    }
-
-                    continue;
-                }
-
-                if ($exists) {
-                    $overwrittenFiles[] = $targetRelPath;
-                } else {
-                    $createdFiles[] = $targetRelPath;
-                }
-
-                if ($stubInfo['isOverride']) {
-                    $overrideFiles[] = $targetRelPath;
-                }
-
+                // Raw asset: copy directly on filesystem without reading into PHP RAM
                 $rawCopiedFiles[] = $targetRelPath;
 
                 if (! $dryRun) {
-                    $this->files->ensureDirectoryExists(dirname($destination));
-                    $this->files->copy($stubInfo['sourcePath'], $destination);
+                    $this->copyFile($stubInfo['sourcePath'], $destination);
                 }
+            }
 
-                $this->dispatchEvent(new FileScaffolded(
-                    destination: $destination,
-                    relativePath: $targetRelPath,
-                    isOverride: $stubInfo['isOverride'],
-                    isRawCopy: true,
-                    dryRun: $dryRun,
-                ));
+            if ($onProgress !== null) {
+                $onProgress($targetRelPath, $currentIndex, $totalFiles);
             }
         }
 
@@ -702,5 +496,84 @@ class StubEngine
         $this->dispatchEvent(new TreeScaffolded($result));
 
         return $result;
+    }
+
+    /**
+     * Write file contents ensuring target directory exists via Laravel Filesystem.
+     */
+    protected function putFile(string $path, string $content): void
+    {
+        $this->files->ensureDirectoryExists($this->files->dirname($path));
+        $this->files->put($path, $content);
+    }
+
+    /**
+     * Copy file from source to target ensuring target directory exists via Laravel Filesystem.
+     */
+    protected function copyFile(string $source, string $target): void
+    {
+        $this->files->ensureDirectoryExists($this->files->dirname($target));
+        $this->files->copy($source, $target);
+    }
+
+    /**
+     * Validate that a destination path stays strictly within the target directory.
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function ensureWithinTargetDirectory(string $targetDir, string $destination): void
+    {
+        $normalizer = new WhitespacePathNormalizer;
+
+        try {
+            $normTarget = ($targetDir === '.' || $targetDir === '')
+                ? ''
+                : $normalizer->normalizePath($targetDir);
+            $normDest = $normalizer->normalizePath($destination);
+        } catch (PathTraversalDetected) {
+            throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
+        }
+
+        if ($normTarget === '') {
+            return;
+        }
+
+        if (! str_starts_with($normDest, $normTarget.'/') && $normDest !== $normTarget) {
+            throw new InvalidArgumentException("Target path [{$destination}] attempts directory traversal outside target directory [{$targetDir}].");
+        }
+    }
+
+    /**
+     * Resolve the effective target boundary for a destination file when no target directory is explicitly provided.
+     */
+    protected function resolveTargetDirectory(string $destination): string
+    {
+        $normalized = str_replace('\\', '/', $destination);
+
+        if (! str_starts_with($normalized, '/')) {
+            return '.';
+        }
+
+        $basePath = str_replace('\\', '/', base_path());
+        if (str_starts_with($normalized, $basePath)) {
+            return $basePath;
+        }
+
+        $tempDir = str_replace('\\', '/', sys_get_temp_dir());
+        if (str_starts_with($normalized, $tempDir)) {
+            return $tempDir;
+        }
+
+        $parts = explode('/', $normalized);
+        $baseParts = [];
+        foreach ($parts as $part) {
+            if ($part === '..') {
+                break;
+            }
+            $baseParts[] = $part;
+        }
+        array_pop($baseParts);
+
+        return implode('/', $baseParts) ?: '/';
     }
 }

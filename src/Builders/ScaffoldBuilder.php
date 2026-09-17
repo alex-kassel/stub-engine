@@ -7,6 +7,7 @@ namespace AlexKassel\StubEngine\Builders;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\Services\StubEngine;
+use Closure;
 use Illuminate\Support\Traits\Conditionable;
 use Illuminate\Support\Traits\Macroable;
 use InvalidArgumentException;
@@ -69,6 +70,8 @@ class ScaffoldBuilder
 
     protected ?string $closeDelimiter = null;
 
+    protected ?Closure $onProgress = null;
+
     public function __construct(
         protected StubEngine $engine,
     ) {}
@@ -128,26 +131,6 @@ class ScaffoldBuilder
     }
 
     /**
-     * Alias for withTokens.
-     *
-     * @param  array<string, mixed>  $tokens
-     */
-    public function with(array $tokens): self
-    {
-        return $this->withTokens($tokens);
-    }
-
-    /**
-     * Set a single token replacement.
-     */
-    public function token(string $key, mixed $value): self
-    {
-        $this->tokens[$key] = (string) $value;
-
-        return $this;
-    }
-
-    /**
      * Automatically discover and activate host overrides according to package conventions:
      * stubs/vendor/{package}/{subpath?}
      *
@@ -160,9 +143,7 @@ class ScaffoldBuilder
             $relativePath .= '/'.trim($subpath, '/');
         }
 
-        $overrideDir = (function_exists('base_path') && function_exists('app') && method_exists(app(), 'basePath'))
-            ? base_path($relativePath)
-            : $relativePath;
+        $overrideDir = base_path($relativePath);
 
         if (is_dir($overrideDir)) {
             $this->overlay($overrideDir);
@@ -298,18 +279,15 @@ class ScaffoldBuilder
     }
 
     /**
-     * Alias for formatWithPint.
+     * Register a progress callback invoked during tree scaffolding.
      *
-     * @param  bool  $enabled  Whether to run Laravel Pint on generated PHP files
-     * @param  bool  $strict  Whether to throw an exception if Pint is missing or fails
-     * @param  string|null  $binary  Optional custom path to the Pint executable
+     * @param  (callable(string $relativePath, int $currentIndex, int $totalFiles): void)|null  $callback
      */
-    public function format(
-        bool $enabled = true,
-        bool $strict = self::DEFAULT_FORMAT_STRICT,
-        ?string $binary = null,
-    ): self {
-        return $this->formatWithPint($enabled, $strict, $binary);
+    public function onProgress(?callable $callback): self
+    {
+        $this->onProgress = $callback !== null ? $callback(...) : null;
+
+        return $this;
     }
 
     /**
@@ -368,6 +346,7 @@ class ScaffoldBuilder
             formatWithPint: $this->formatWithPint,
             formatStrict: $this->formatStrict,
             pintBinary: $this->pintBinary,
+            targetDir: $this->targetDir,
         );
     }
 
@@ -397,6 +376,7 @@ class ScaffoldBuilder
             formatWithPint: $this->formatWithPint,
             formatStrict: $this->formatStrict,
             pintBinary: $this->pintBinary,
+            onProgress: $this->onProgress,
         );
     }
 

@@ -37,4 +37,43 @@ class InterpolatorTest extends TestCase
         $result = $interpolator->interpolate($template, ['model' => '']);
         $this->assertSame('ORDER', $result);
     }
+
+    public function test_interpolator_correctly_interpolates_tokens_with_hyphens_and_dots(): void
+    {
+        $interpolator = new Interpolator;
+
+        $template = 'Package: {{ package-name }}, upper: {{ package-name | upper }}, domain: {{ app.domain }}. Keep original package-name text intact.';
+        $unresolved = [];
+        $result = $interpolator->interpolate(
+            content: $template,
+            tokens: [
+                'package-name' => 'billing-module',
+                'app.domain' => 'example.com',
+            ],
+            unresolved: $unresolved,
+        );
+
+        $this->assertSame([], $unresolved);
+        $this->assertSame(
+            'Package: billing-module, upper: BILLING-MODULE, domain: example.com. Keep original package-name text intact.',
+            $result
+        );
+    }
+
+    public function test_date_modifier_formats_valid_dates(): void
+    {
+        $interpolator = new Interpolator;
+
+        $template = '{{ created_at | date:Y-m-d }}';
+        $result = $interpolator->interpolate($template, ['created_at' => '2026-09-17 10:00:00']);
+        $this->assertSame('2026-09-17', $result);
+    }
+
+    public function test_date_modifier_throws_exception_on_unparseable_date(): void
+    {
+        $interpolator = new Interpolator;
+
+        $this->expectException(\InvalidArgumentException::class);
+        $interpolator->interpolate('{{ created_at | date:Y-m-d }}', ['created_at' => 'not-a-valid-date']);
+    }
 }

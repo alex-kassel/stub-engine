@@ -8,9 +8,6 @@ use AlexKassel\StubEngine\Engines\Interpolator;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\Resolvers\StubResolver;
 use AlexKassel\StubEngine\Services\StubEngine;
-use AlexKassel\StubEngine\StubEngineServiceProvider;
-use AlexKassel\StubEngine\Support\PathGuard;
-use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Facade;
@@ -323,29 +320,17 @@ class StubEngineTest extends TestCase
 
     public function test_custom_delimiters_and_global_tokens_via_config(): void
     {
-        $app = new Container;
-        Container::setInstance($app);
-        Facade::setFacadeApplication($app);
-
-        // Bind config repository in container
-        $config = new Repository([
-            'stub-engine' => [
-                'delimiters' => [
-                    'open' => '[[',
-                    'close' => ']]',
-                ],
-                'global_tokens' => [
-                    'company' => 'Acme Global',
-                    'year' => '2026',
-                ],
-            ],
+        $this->app['config']->set('stub-engine.delimiters', [
+            'open' => '[[',
+            'close' => ']]',
         ]);
-        $app->instance('config', $config);
-        $provider = new StubEngineServiceProvider($app);
-        $provider->register();
+        $this->app['config']->set('stub-engine.global_tokens', [
+            'company' => 'Acme Global',
+            'year' => '2026',
+        ]);
 
         /** @var StubEngine $engine */
-        $engine = $app->make(StubEngine::class);
+        $engine = $this->app->make(StubEngine::class);
 
         $template = 'Company: [[ company|kebab ]], Year: [[ year ]], User: [[ user|studly ]]';
         $rendered = $engine->interpolate($template, [
@@ -379,19 +364,13 @@ class StubEngineTest extends TestCase
 
     public function test_facade_and_container_binding(): void
     {
-        $app = new Container;
-        Facade::setFacadeApplication($app);
-
-        $provider = new StubEngineServiceProvider($app);
-        $provider->register();
-
         $stub = "{$this->tempDir}/facade.stub";
         $this->files->put($stub, 'Hello {{ name }}');
 
         $content = \AlexKassel\StubEngine\Facades\StubEngine::renderFile($stub, ['{{ name }}' => 'Laravel']);
         $this->assertSame('Hello Laravel', $content);
 
-        $instance = $app->make(StubEngine::class);
+        $instance = $this->app->make(StubEngine::class);
         $this->assertInstanceOf(StubEngine::class, $instance);
     }
 
@@ -405,15 +384,6 @@ class StubEngineTest extends TestCase
         $rendered = $engine->interpolate($template, ['name' => 'John Doe']);
 
         $this->assertSame('Reversed: eoD nhoJ, Slug: john-doe', $rendered);
-    }
-
-    public function test_interpolate_with_map(): void
-    {
-        $engine = new StubEngine($this->files);
-        $compiled = $engine->resolveTokens(['pkg' => 'stub-engine']);
-
-        $result = $engine->interpolateWithMap('Hello {{ pkg }} and {{ pkg|studly }}', $compiled);
-        $this->assertSame('Hello stub-engine and StubEngine', $result);
     }
 
     public function test_path_traversal_protection_in_scaffold_tree(): void
@@ -592,6 +562,55 @@ class StubEngineTest extends TestCase
         }
     }
 
+    public function test_scaffold_file_prevents_relative_directory_traversal(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('attempts directory traversal outside target directory');
+
+        $engine = new StubEngine($this->files);
+        $sourceStub = "{$this->tempDir}/source.stub";
+        $this->files->put($sourceStub, 'content');
+
+        $engine->scaffoldFile(
+            sourceFile: $sourceStub,
+            targetFile: '../escaped_relative_file.txt',
+            tokens: [],
+        );
+    }
+
+    public function test_scaffold_file_prevents_absolute_directory_traversal(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('attempts directory traversal outside target directory');
+
+        $engine = new StubEngine($this->files);
+        $sourceStub = "{$this->tempDir}/source.stub";
+        $this->files->put($sourceStub, 'content');
+
+        $engine->scaffoldFile(
+            sourceFile: $sourceStub,
+            targetFile: "{$this->tempDir}/sub/../../../../etc/malicious_cron",
+            tokens: [],
+        );
+    }
+
+    public function test_scaffold_file_respects_explicit_target_dir_boundary(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('attempts directory traversal outside target directory');
+
+        $engine = new StubEngine($this->files);
+        $sourceStub = "{$this->tempDir}/source.stub";
+        $this->files->put($sourceStub, 'content');
+
+        $engine->scaffoldFile(
+            sourceFile: $sourceStub,
+            targetFile: "{$this->tempDir}/outside/escaped.txt",
+            tokens: [],
+            targetDir: "{$this->tempDir}/allowed_zone",
+        );
+    }
+
     public function test_find_unresolved_tokens_captures_placeholders_with_spaces_and_chains(): void
     {
         $engine = new StubEngine($this->files);
@@ -722,6 +741,5 @@ class StubEngineTest extends TestCase
         $this->assertSame($this->files, $engine->filesystem());
         $this->assertInstanceOf(Interpolator::class, $engine->interpolator());
         $this->assertInstanceOf(StubResolver::class, $engine->resolver());
-        $this->assertInstanceOf(PathGuard::class, $engine->pathGuard());
     }
 }

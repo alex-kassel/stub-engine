@@ -41,26 +41,17 @@ class ScaffoldBuilderTest extends TestCase
         $builder1 = $this->engine->newBuilder();
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder1);
 
-        $builder2 = StubEngine::builder();
+        $builder2 = $this->engine->from($this->tempDir);
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder2);
 
-        $builder3 = StubEngine::from($this->tempDir);
+        $builder3 = $this->engine->fromFile($this->tempDir.'/file.stub');
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder3);
 
-        $builder4 = StubEngine::fromFile($this->tempDir.'/file.stub');
+        $builder4 = $this->engine->from($this->tempDir)->forPackage('alex-kassel/test-pkg');
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder4);
-
-        $builder5 = $this->engine->from($this->tempDir);
-        $this->assertInstanceOf(ScaffoldBuilder::class, $builder5);
-
-        $builder6 = $this->engine->fromFile($this->tempDir.'/file.stub');
-        $this->assertInstanceOf(ScaffoldBuilder::class, $builder6);
-
-        $builder7 = StubEngine::forPackage('alex-kassel/test-pkg');
-        $this->assertInstanceOf(ScaffoldBuilder::class, $builder7);
     }
 
-    public function test_builder_accumulates_tokens_via_with_with_tokens_and_token(): void
+    public function test_builder_accumulates_tokens_via_with_tokens(): void
     {
         $sourceDir = $this->tempDir.'/source';
         $targetDir = $this->tempDir.'/target';
@@ -70,9 +61,7 @@ class ScaffoldBuilderTest extends TestCase
         $result = $this->engine->newBuilder()
             ->from($sourceDir)
             ->to($targetDir)
-            ->withTokens(['name' => 'Alice'])
-            ->with(['place' => 'Wonderland'])
-            ->token('day', 'Monday')
+            ->withTokens(['name' => 'Alice', 'place' => 'Wonderland', 'day' => 'Monday'])
             ->scaffold();
 
         $this->assertInstanceOf(ScaffoldResult::class, $result);
@@ -94,7 +83,7 @@ class ScaffoldBuilderTest extends TestCase
             ->from($sourceDir)
             ->to($targetDir)
             ->when($isProduction, function (ScaffoldBuilder $builder): void {
-                $builder->token('flag', 'PROD');
+                $builder->withTokens(['flag' => 'PROD']);
             })
             ->unless($isDebug, function (ScaffoldBuilder $builder): void {
                 $builder->force(true);
@@ -109,7 +98,7 @@ class ScaffoldBuilderTest extends TestCase
     {
         ScaffoldBuilder::macro('withAuthor', function (string $author): ScaffoldBuilder {
             /** @var ScaffoldBuilder $this */
-            return $this->token('author', $author);
+            return $this->withTokens(['author' => $author]);
         });
 
         $sourceDir = $this->tempDir.'/source';
@@ -135,7 +124,7 @@ class ScaffoldBuilderTest extends TestCase
         $builder = $this->engine->newBuilder()
             ->fromFile($sourceFile)
             ->toFile($targetFile)
-            ->token('class', 'MyClass');
+            ->withTokens(['class' => 'MyClass']);
 
         $rendered = $builder->render();
         $this->assertSame('<?php class MyClass {}', $rendered);
