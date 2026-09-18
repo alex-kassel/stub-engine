@@ -65,7 +65,7 @@ class ScaffoldBuilder
     /**
      * Set the host override file or directory and optional override strategy.
      */
-    public function override(?string $override, OverrideStrategy $strategy = OverrideStrategy::Overlay): self
+    public function override(string $override, OverrideStrategy $strategy = OverrideStrategy::Overlay): self
     {
         $this->options['override'] = $override;
         $this->options['strategy'] = $strategy;
