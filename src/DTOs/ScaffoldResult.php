@@ -4,18 +4,10 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\DTOs;
 
-use Countable;
-use Illuminate\Contracts\Support\Arrayable;
-
-/**
- * @implements Arrayable<string, mixed>
- */
-final readonly class ScaffoldResult implements Arrayable, Countable
+final readonly class ScaffoldResult
 {
     /** @var array<int, string> */
     public array $renderedFiles;
-
-    public int $fileCount;
 
     /**
      * @param  ScaffoldRequest  $request  The request that initiated the scaffolding
@@ -36,22 +28,5 @@ final readonly class ScaffoldResult implements Arrayable, Countable
         public array $unresolvedTokens = [],
     ) {
         $this->renderedFiles = array_values(array_unique(array_merge($this->createdFiles, $this->overwrittenFiles)));
-        $this->fileCount = count($this->renderedFiles);
-    }
-
-    /**
-     * Total number of rendered files.
-     */
-    public function count(): int
-    {
-        return $this->fileCount;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function toArray(): array
-    {
-        return get_object_vars($this);
     }
 }

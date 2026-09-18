@@ -114,7 +114,7 @@ class ScaffolderTest extends TestCase
             strategy: OverrideStrategy::Overlay,
         ));
 
-        $this->assertCount(2, $result);
+        $this->assertCount(2, $result->renderedFiles);
         $this->assertNotEmpty($result->overrideFiles);
         $this->assertStringEqualsFile("{$target}/base.txt", 'default 123');
         $this->assertStringEqualsFile("{$target}/shared.txt", 'custom shared 123');
@@ -139,7 +139,7 @@ class ScaffolderTest extends TestCase
             strategy: OverrideStrategy::Replace,
         ));
 
-        $this->assertCount(1, $result);
+        $this->assertCount(1, $result->renderedFiles);
         $this->assertFileExists("{$target}/custom.txt");
         $this->assertFileDoesNotExist("{$target}/base.txt");
     }

@@ -8,7 +8,6 @@ use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\StubEngine;
-use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
 
@@ -54,7 +53,7 @@ class StubEngineTest extends TestCase
             ],
         ));
 
-        $this->assertSame(2, $result->fileCount);
+        $this->assertCount(2, $result->renderedFiles);
         $this->assertEmpty($result->overrideFiles);
         $this->assertFileExists("{$targetDir}/composer.json");
         $this->assertFileExists("{$targetDir}/src/MyTool.php");
@@ -172,7 +171,7 @@ class StubEngineTest extends TestCase
             override: $overrideStubs,
         ));
 
-        $this->assertSame(3, count($result));
+        $this->assertCount(3, $result->renderedFiles);
         $this->assertNotEmpty($result->overrideFiles);
         $this->assertCount(2, $result->overrideFiles);
         $this->assertContains('shared.txt', $result->overrideFiles);
@@ -255,7 +254,7 @@ class StubEngineTest extends TestCase
         ));
 
         $this->assertTrue($treeResult->request->dryRun);
-        $this->assertSame(1, count($treeResult));
+        $this->assertCount(1, $treeResult->renderedFiles);
         $this->assertSame(['file.txt'], $treeResult->createdFiles);
         $this->assertFileDoesNotExist("{$targetDir}/file.txt");
     }
@@ -314,7 +313,7 @@ class StubEngineTest extends TestCase
         ));
 
         $this->assertSame(OverrideStrategy::Replace, $result->request->strategy);
-        $this->assertSame(1, count($result));
+        $this->assertCount(1, $result->renderedFiles);
         $this->assertFileExists("{$targetDir}/custom_only.txt");
         $this->assertFileDoesNotExist("{$targetDir}/default_one.txt");
         $this->assertFileDoesNotExist("{$targetDir}/default_two.txt");
@@ -377,7 +376,7 @@ class StubEngineTest extends TestCase
             closeDelimiter: '%>',
         ));
 
-        $this->assertSame(1, count($result));
+        $this->assertCount(1, $result->renderedFiles);
         $this->assertFileExists("{$targetDir}/src/BillingService.php");
         $this->assertStringEqualsFile("{$targetDir}/src/BillingService.php", 'namespace App\BillingService; class BillingService {}');
     }
@@ -429,7 +428,7 @@ class StubEngineTest extends TestCase
             ignoredFiles: ['.DS_Store', '.gitkeep'],
         ));
 
-        $this->assertSame(2, count($result));
+        $this->assertCount(2, $result->renderedFiles);
         $this->assertNotEmpty($result->rawCopiedFiles);
         $this->assertContains('binary_asset.bin', $result->rawCopiedFiles);
         $this->assertFileExists("{$targetDir}/template.txt");
@@ -616,7 +615,7 @@ class StubEngineTest extends TestCase
             strict: true,
         ));
 
-        $this->assertSame(1, count($result));
+        $this->assertCount(1, $result->renderedFiles);
         $this->assertEmpty($result->unresolvedTokens);
         $this->assertFileExists("{$targetDir}/view.blade.php");
         $this->assertStringEqualsFile(
@@ -690,7 +689,7 @@ class StubEngineTest extends TestCase
         $this->assertSame('=== WELCOME ===', $result);
     }
 
-    public function test_scaffold_result_implements_arrayable_and_countable(): void
+    public function test_scaffold_result_properties(): void
     {
         $request = new ScaffoldRequest(source: '/source');
         $result = new ScaffoldResult(
@@ -701,18 +700,10 @@ class StubEngineTest extends TestCase
             overrideFiles: ['d.txt'],
         );
 
-        $this->assertInstanceOf(Arrayable::class, $result);
-        $this->assertInstanceOf(\Countable::class, $result);
-        $this->assertCount(2, $result);
-        $this->assertSame(2, $result->fileCount);
         $this->assertSame(['a.txt', 'b.txt'], $result->renderedFiles);
-
-        $array = $result->toArray();
-        $this->assertSame(['a.txt'], $array['createdFiles']);
-        $this->assertSame(['b.txt'], $array['overwrittenFiles']);
-        $this->assertSame(['c.txt'], $array['skippedFiles']);
-        $this->assertSame(['d.txt'], $array['overrideFiles']);
-        $this->assertSame(['a.txt', 'b.txt'], $array['renderedFiles']);
-        $this->assertSame(2, $array['fileCount']);
+        $this->assertSame(['a.txt'], $result->createdFiles);
+        $this->assertSame(['b.txt'], $result->overwrittenFiles);
+        $this->assertSame(['c.txt'], $result->skippedFiles);
+        $this->assertSame(['d.txt'], $result->overrideFiles);
     }
 }

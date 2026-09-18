@@ -152,7 +152,7 @@ $result = StubEngine::from(__DIR__ . '/../stubs')
     ->override(base_path('stubs/my-generator'))
     ->scaffold();
 
-echo "Rendered {$result->fileCount} files into {$result->targetDir}!";
+echo "Rendered " . count($result->renderedFiles) . " files into {$result->request->target}!";
 ```
 
 ---
@@ -193,8 +193,9 @@ class MakeModuleCommand extends Command
             overrideDir: base_path('stubs/modules'),
         );
 
-        $source = $result->isOverride ? 'custom host stubs' : 'default stubs';
-        $this->info("Module [{$name}] scaffolded successfully using {$source} ({$result->fileCount} files).");
+        $source = $result->overrideFiles !== [] ? 'custom host stubs' : 'default stubs';
+        $count = count($result->renderedFiles);
+        $this->info("Module [{$name}] scaffolded successfully using {$source} ({$count} files).");
 
         return self::SUCCESS;
     }
@@ -357,7 +358,7 @@ $result = StubEngine::scaffoldTree(
 );
 
 // Count of rendered files
-echo count($result); // or $result->fileCount
+echo count($result->renderedFiles);
 
 // Detailed file categorizations
 $created     = $result->createdFiles;     // ['src/MyTool.php']
