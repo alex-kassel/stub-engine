@@ -1,0 +1,77 @@
+{
+    "schema_version": "1.0.0",
+    "auditor_version": "1.0.0",
+    "package": "alex-kassel/stub-engine",
+    "version": "1.0.0",
+    "audit": {
+        "commit": "f2cc23f61e3e08fdfe114565f0cbe8644b5600dc",
+        "tree_hash": "f0e5bd7b8afe97f5cefa57f7724e00510de36caa",
+        "branch": "main",
+        "timestamp": "2026-09-18T19:19:56+00:00",
+        "environment": {
+            "php": "8.3.28",
+            "laravel": "13.31.0",
+            "os": "darwin"
+        }
+    },
+    "checks": {
+        "composer_validate": {
+            "check": "composer",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "packages/alex-kassel/stub-engine/composer.json is valid",
+            "duration_seconds": 0.22
+        },
+        "pint": {
+            "check": "pint",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "{\"tool\":\"pint\",\"result\":\"passed\"}",
+            "duration_seconds": 0.353
+        },
+        "phpstan": {
+            "check": "phpstan",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "{\"tool\":\"phpstan\",\"result\":\"passed\",\"errors\":0}",
+            "duration_seconds": 1.658
+        },
+        "tests": {
+            "check": "tests",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "{\"tool\":\"phpunit\",\"result\":\"passed\",\"tests\":70,\"passed\":70,\"assertions\":234,\"duration_ms\":339}",
+            "duration_seconds": 0.516
+        },
+        "isolated": {
+            "check": "isolated",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.\n\nRuntime:       PHP 8.3.28\nConfiguration: /private/var/folders/px/ykxw69555z9_pgw_yyv14fxh0000gn/T/wdt-isolated-f353466593d9868ca3a2edde/project/phpunit.xml.dist\n\n................................................................. 65 / 70 ( 92%)\n.....                                                             70 / 70 (100%)\n\nTime: 00:00.349, Memory: 28.00 MB\n\nOK (70 tests, 234 assertions)\n",
+            "duration_seconds": 9.851
+        },
+        "git_cleanliness": {
+            "check": "git_cleanliness",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "Git repository is clean. No uncommitted changes.",
+            "duration_seconds": 0.018
+        },
+        "readme": {
+            "check": "readme",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": "README matches configured standard sections.",
+            "duration_seconds": 0.001
+        },
+        "export_ignore": {
+            "check": "export_ignore",
+            "package": "alex-kassel/stub-engine",
+            "status": "passed",
+            "output": ".gitattributes contains valid export-ignore directives.",
+            "duration_seconds": 0
+        }
+    },
+    "verdict": "PASSED",
+    "fingerprint": "sha256:c4c04941397c020ba8e4a8821c68365fc44eb4a774dd7473a85b8c9617c02349"
+}
