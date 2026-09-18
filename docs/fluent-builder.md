@@ -183,9 +183,6 @@ Completely substitutes the source directory with the override directory if it ex
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 
 $builder->override('/path/to/host/stubs', OverrideStrategy::Replace);
-
-// Or via explicit strategy method:
-$builder->override('/path/to/host/stubs')->strategy(OverrideStrategy::Replace);
 ```
 
 ---

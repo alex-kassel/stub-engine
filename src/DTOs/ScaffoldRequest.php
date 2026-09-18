@@ -6,8 +6,12 @@ namespace AlexKassel\StubEngine\DTOs;
 
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use Closure;
+use Illuminate\Contracts\Support\Arrayable;
 
-final readonly class ScaffoldRequest
+/**
+ * @implements Arrayable<string, mixed>
+ */
+final readonly class ScaffoldRequest implements Arrayable
 {
     /**
      * @param  string  $source  Source stub file or directory
@@ -38,4 +42,12 @@ final readonly class ScaffoldRequest
         public array $ignoredFiles = [],
         public ?Closure $onProgress = null,
     ) {}
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return get_object_vars($this);
+    }
 }

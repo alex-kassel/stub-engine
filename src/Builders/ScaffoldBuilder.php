@@ -8,7 +8,6 @@ use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\StubEngine;
-use Closure;
 use Illuminate\Support\Traits\Conditionable;
 use Illuminate\Support\Traits\Macroable;
 use InvalidArgumentException;
@@ -18,41 +17,16 @@ class ScaffoldBuilder
     use Conditionable;
     use Macroable;
 
-    protected ?string $source = null;
-
-    protected ?string $target = null;
-
-    protected ?string $override = null;
-
     /**
-     * @var array<string, string>
+     * @var array<string, mixed>
      */
-    protected array $tokens = [];
-
-    protected OverrideStrategy $strategy = OverrideStrategy::Overlay;
-
-    protected string $stubExtension = '.stub';
-
-    protected bool $force = false;
-
-    protected bool $dryRun = false;
-
-    protected bool $strict = false;
-
-    protected ?string $openDelimiter = null;
-
-    protected ?string $closeDelimiter = null;
-
-    /**
-     * @var array<int, string>
-     */
-    protected array $ignoredFiles = [];
-
-    protected ?Closure $onProgress = null;
+    protected array $options = [];
 
     public function __construct(
         protected StubEngine $engine,
-    ) {}
+    ) {
+        $this->options = (new ScaffoldRequest(''))->toArray();
+    }
 
     /**
      * Set files to ignore during directory crawling.
@@ -61,7 +35,9 @@ class ScaffoldBuilder
      */
     public function ignore(array $files): self
     {
-        $this->ignoredFiles = array_values(array_unique(array_merge($this->ignoredFiles, $files)));
+        $this->options['ignoredFiles'] = array_values(
+            array_unique(array_merge($this->options['ignoredFiles'], $files))
+        );
 
         return $this;
     }
@@ -71,7 +47,7 @@ class ScaffoldBuilder
      */
     public function from(string $source): self
     {
-        $this->source = $source;
+        $this->options['source'] = $source;
 
         return $this;
     }
@@ -81,7 +57,7 @@ class ScaffoldBuilder
      */
     public function to(string $target): self
     {
-        $this->target = $target;
+        $this->options['target'] = $target;
 
         return $this;
     }
@@ -91,8 +67,8 @@ class ScaffoldBuilder
      */
     public function override(?string $override, OverrideStrategy $strategy = OverrideStrategy::Overlay): self
     {
-        $this->override = $override;
-        $this->strategy = $strategy;
+        $this->options['override'] = $override;
+        $this->options['strategy'] = $strategy;
 
         return $this;
     }
@@ -105,18 +81,8 @@ class ScaffoldBuilder
     public function withTokens(array $tokens): self
     {
         foreach ($tokens as $key => $value) {
-            $this->tokens[(string) $key] = (string) $value;
+            $this->options['tokens'][(string) $key] = (string) $value;
         }
-
-        return $this;
-    }
-
-    /**
-     * Explicitly set the override strategy.
-     */
-    public function strategy(OverrideStrategy $strategy): self
-    {
-        $this->strategy = $strategy;
 
         return $this;
     }
@@ -126,7 +92,7 @@ class ScaffoldBuilder
      */
     public function stubExtension(string $extension): self
     {
-        $this->stubExtension = $extension;
+        $this->options['stubExtension'] = $extension;
 
         return $this;
     }
@@ -136,8 +102,8 @@ class ScaffoldBuilder
      */
     public function delimiters(string $open, string $close): self
     {
-        $this->openDelimiter = $open;
-        $this->closeDelimiter = $close;
+        $this->options['openDelimiter'] = $open;
+        $this->options['closeDelimiter'] = $close;
 
         return $this;
     }
@@ -147,7 +113,7 @@ class ScaffoldBuilder
      */
     public function force(bool $force = true): self
     {
-        $this->force = $force;
+        $this->options['force'] = $force;
 
         return $this;
     }
@@ -157,7 +123,7 @@ class ScaffoldBuilder
      */
     public function dryRun(bool $dryRun = true): self
     {
-        $this->dryRun = $dryRun;
+        $this->options['dryRun'] = $dryRun;
 
         return $this;
     }
@@ -167,7 +133,7 @@ class ScaffoldBuilder
      */
     public function strict(bool $strict = true): self
     {
-        $this->strict = $strict;
+        $this->options['strict'] = $strict;
 
         return $this;
     }
@@ -179,7 +145,7 @@ class ScaffoldBuilder
      */
     public function onProgress(?callable $callback): self
     {
-        $this->onProgress = $callback !== null ? $callback(...) : null;
+        $this->options['onProgress'] = $callback !== null ? $callback(...) : null;
 
         return $this;
     }
@@ -196,30 +162,10 @@ class ScaffoldBuilder
 
     /**
      * Build the immutable ScaffoldRequest DTO from configured builder state.
-     *
-     * @throws InvalidArgumentException
      */
     public function toRequest(): ScaffoldRequest
     {
-        if ($this->source === null) {
-            throw new InvalidArgumentException('Source must be specified via from().');
-        }
-
-        return new ScaffoldRequest(
-            source: $this->source,
-            target: $this->target,
-            tokens: $this->tokens,
-            override: $this->override,
-            strategy: $this->strategy,
-            stubExtension: $this->stubExtension,
-            force: $this->force,
-            dryRun: $this->dryRun,
-            strict: $this->strict,
-            openDelimiter: $this->openDelimiter,
-            closeDelimiter: $this->closeDelimiter,
-            ignoredFiles: $this->ignoredFiles,
-            onProgress: $this->onProgress,
-        );
+        return new ScaffoldRequest(...$this->options);
     }
 
     /**

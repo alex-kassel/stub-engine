@@ -9,6 +9,7 @@ use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\StubEngine;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
 
@@ -217,20 +218,29 @@ class ScaffoldBuilderTest extends TestCase
             ->scaffold();
     }
 
-    public function test_missing_from_or_to_throws_invalid_argument_exception(): void
+    public function test_missing_target_throws_invalid_argument_exception(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Source must be specified via from().');
+        $this->expectExceptionMessage('Target destination must be specified for scaffolding.');
 
-        app(ScaffoldBuilder::class)->scaffold();
+        app(ScaffoldBuilder::class)->from('/non-existent')->scaffold();
     }
 
     public function test_missing_source_file_throws_invalid_argument_exception_on_render_file(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Source must be specified via from().');
+        $this->expectExceptionMessage('Stub file not found: [].');
 
         app(ScaffoldBuilder::class)->renderFile();
+    }
+
+    public function test_scaffold_request_implements_arrayable_and_to_array(): void
+    {
+        $request = new ScaffoldRequest(source: '/source');
+        $this->assertInstanceOf(Arrayable::class, $request);
+        $array = $request->toArray();
+        $this->assertSame('/source', $array['source']);
+        $this->assertSame(OverrideStrategy::Overlay, $array['strategy']);
     }
 
     public function test_builder_render_file_throws_exception_when_source_is_directory(): void
