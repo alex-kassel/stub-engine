@@ -54,7 +54,7 @@ class ScaffolderTest extends TestCase
         ));
 
         $this->assertInstanceOf(ScaffoldResult::class, $result);
-        $this->assertTrue($result->hasCreated());
+        $this->assertNotEmpty($result->createdFiles);
         $this->assertFileExists($target);
         $this->assertStringEqualsFile($target, 'Hello World');
     }
@@ -115,7 +115,7 @@ class ScaffolderTest extends TestCase
         ));
 
         $this->assertCount(2, $result);
-        $this->assertTrue($result->hasOverrides());
+        $this->assertNotEmpty($result->overrideFiles);
         $this->assertStringEqualsFile("{$target}/base.txt", 'default 123');
         $this->assertStringEqualsFile("{$target}/shared.txt", 'custom shared 123');
     }

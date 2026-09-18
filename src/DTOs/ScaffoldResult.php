@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace AlexKassel\StubEngine\DTOs;
 
 use Countable;
+use Illuminate\Contracts\Support\Arrayable;
 
-final readonly class ScaffoldResult implements Countable
+/**
+ * @implements Arrayable<string, mixed>
+ */
+final readonly class ScaffoldResult implements Arrayable, Countable
 {
     /** @var array<int, string> */
     public array $renderedFiles;
@@ -44,58 +48,10 @@ final readonly class ScaffoldResult implements Countable
     }
 
     /**
-     * Check if any files were resolved from host overrides.
+     * @return array<string, mixed>
      */
-    public function hasOverrides(): bool
+    public function toArray(): array
     {
-        return $this->overrideFiles !== [];
-    }
-
-    /**
-     * Check if any new files were created.
-     */
-    public function hasCreated(): bool
-    {
-        return $this->createdFiles !== [];
-    }
-
-    /**
-     * Check if any files were skipped.
-     */
-    public function hasSkipped(): bool
-    {
-        return $this->skippedFiles !== [];
-    }
-
-    /**
-     * Check if any existing files were overwritten.
-     */
-    public function hasOverwritten(): bool
-    {
-        return $this->overwrittenFiles !== [];
-    }
-
-    /**
-     * Check if the operation was successful (created or overwritten at least one file).
-     */
-    public function successful(): bool
-    {
-        return $this->hasCreated() || $this->hasOverwritten();
-    }
-
-    /**
-     * Check if any files have unresolved token placeholders.
-     */
-    public function hasUnresolvedTokens(): bool
-    {
-        return $this->unresolvedTokens !== [];
-    }
-
-    /**
-     * Check if any raw/binary files were copied directly.
-     */
-    public function hasRawCopied(): bool
-    {
-        return $this->rawCopiedFiles !== [];
+        return get_object_vars($this);
     }
 }

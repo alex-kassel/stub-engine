@@ -104,7 +104,7 @@ $result = StubEngine::from(__DIR__ . '/../stubs/runner.stub')
     ->force(false) // Skip if target file already exists
     ->scaffold();
 
-if ($result->successful()) {
+if ($result->renderedFiles !== []) {
     echo "Standalone runner created at bin/my-tool!";
 }
 ```
@@ -357,25 +357,22 @@ $result = StubEngine::scaffoldTree(
 );
 
 // Count of rendered files
-echo count($result); // or $result->totalFiles()
+echo count($result); // or $result->fileCount
 
 // Detailed file categorizations
 $created     = $result->createdFiles;     // ['src/MyTool.php']
 $overwritten = $result->overwrittenFiles; // []
 $skipped     = $result->skippedFiles;     // ['composer.json']
 $overridden  = $result->overrideFiles;    // ['src/MyTool.php']
+$rendered    = $result->renderedFiles;    // ['src/MyTool.php']
 
-// Status helpers
-if ($result->hasOverrides()) {
+// Direct status checks
+if ($result->overrideFiles !== []) {
     echo "Custom host stubs were utilized!";
 }
 
-if ($result->hasSkipped()) {
+if ($result->skippedFiles !== []) {
     echo "Some files already existed and were protected from overwriting.";
-}
-
-if ($result->isReplace()) {
-    echo "Directory was generated using complete Replace strategy.";
 }
 ```
 

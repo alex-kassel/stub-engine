@@ -131,7 +131,7 @@ class ScaffoldBuilderTest extends TestCase
 
         $scaffolded = $builder->scaffold();
         $this->assertInstanceOf(ScaffoldResult::class, $scaffolded);
-        $this->assertTrue($scaffolded->successful());
+        $this->assertNotEmpty($scaffolded->renderedFiles);
         $this->assertFileExists($targetFile);
         $this->assertSame('<?php class MyClass {}', $this->files->get($targetFile));
     }
@@ -267,7 +267,7 @@ class ScaffoldBuilderTest extends TestCase
             ->scaffold();
 
         $this->assertInstanceOf(ScaffoldResult::class, $fileResult);
-        $this->assertTrue($fileResult->successful());
+        $this->assertNotEmpty($fileResult->renderedFiles);
         $this->assertSame('Unified File', $this->files->get($targetFile));
 
         // 2. Directory tree via unified from() and to()
@@ -282,7 +282,7 @@ class ScaffoldBuilderTest extends TestCase
             ->scaffold();
 
         $this->assertInstanceOf(ScaffoldResult::class, $treeResult);
-        $this->assertTrue($treeResult->successful());
+        $this->assertNotEmpty($treeResult->renderedFiles);
         $this->assertSame('Hello Tree', $this->files->get($targetDir.'/hello.txt'));
     }
 
@@ -299,7 +299,7 @@ class ScaffoldBuilderTest extends TestCase
         );
 
         $result = $this->engine->scaffold($request);
-        $this->assertTrue($result->successful());
+        $this->assertNotEmpty($result->renderedFiles);
         $this->assertSame('Direct Request', $this->files->get($target));
     }
 

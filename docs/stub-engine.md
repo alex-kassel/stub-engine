@@ -145,13 +145,13 @@ class AppServiceProvider extends ServiceProvider
 
             $result = $this->from(resource_path('stubs/action.stub'))
                 ->to("{$targetDir}/{$name}.php")
-                ->with([
+                ->withTokens([
                     'namespace' => $ns,
                     'class'     => $name,
                 ])
                 ->scaffold();
 
-            return $result->successful();
+            return $result->renderedFiles !== [];
         });
     }
 }
