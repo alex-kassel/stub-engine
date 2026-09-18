@@ -203,4 +203,38 @@ class ScaffolderTest extends TestCase
             target: "{$this->tempDir}/some_target",
         ));
     }
+
+    public function test_scaffolder_tree_rejects_path_traversal_in_interpolated_filename(): void
+    {
+        $sourceDir = "{$this->tempDir}/traversal_source";
+        $targetDir = "{$this->tempDir}/traversal_target";
+        $this->files->ensureDirectoryExists($sourceDir);
+        $this->files->put($sourceDir.'/{{ path }}.txt.stub', 'malicious content');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Scaffold path escapes target directory: [../../evil.txt].');
+
+        $this->scaffolder->scaffold(new ScaffoldRequest(
+            source: $sourceDir,
+            target: $targetDir,
+            tokens: ['path' => '../../evil'],
+        ));
+    }
+
+    public function test_scaffolder_tree_rejects_absolute_path_in_interpolated_filename(): void
+    {
+        $sourceDir = "{$this->tempDir}/abs_source";
+        $targetDir = "{$this->tempDir}/abs_target";
+        $this->files->ensureDirectoryExists($sourceDir);
+        $this->files->put($sourceDir.'/{{ path }}.txt.stub', 'malicious content');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Scaffold path escapes target directory: [/etc/passwd.txt].');
+
+        $this->scaffolder->scaffold(new ScaffoldRequest(
+            source: $sourceDir,
+            target: $targetDir,
+            tokens: ['path' => '/etc/passwd'],
+        ));
+    }
 }

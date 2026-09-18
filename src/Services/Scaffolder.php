@@ -63,13 +63,15 @@ class Scaffolder
      */
     protected function scaffoldFile(ScaffoldRequest $request): ScaffoldResult
     {
-        if ($this->files->isDirectory($request->target)) {
-            throw new InvalidArgumentException("Target path [{$request->target}] is an existing directory. File scaffolding requires a file destination.");
+        $target = $request->target ?? throw new InvalidArgumentException('Target destination must be specified for file scaffolding.');
+
+        if ($this->files->isDirectory($target)) {
+            throw new InvalidArgumentException("Target path [{$target}] is an existing directory. File scaffolding requires a file destination.");
         }
 
         $sourceFile = $this->resolveSourceFile($request);
-        $exists = $this->files->exists($request->target);
-        $fileName = basename($request->target);
+        $exists = $this->files->exists($target);
+        $fileName = basename($target);
 
         $createdFiles = [];
         $overwrittenFiles = [];
@@ -81,7 +83,7 @@ class Scaffolder
             $rendered = $this->renderFile($request);
 
             if (! $request->dryRun) {
-                $this->putFile($request->target, $rendered);
+                $this->putFile($target, $rendered);
             }
 
             if ($exists) {
@@ -105,8 +107,10 @@ class Scaffolder
      */
     protected function scaffoldTree(ScaffoldRequest $request): ScaffoldResult
     {
-        if ($this->files->isFile($request->target)) {
-            throw new InvalidArgumentException("Target path [{$request->target}] is an existing file. Directory tree scaffolding requires a directory destination.");
+        $target = $request->target ?? throw new InvalidArgumentException('Target destination must be specified for directory scaffolding.');
+
+        if ($this->files->isFile($target)) {
+            throw new InvalidArgumentException("Target path [{$target}] is an existing file. Directory tree scaffolding requires a directory destination.");
         }
 
         $stubsMap = $this->resolveStubsMap($request);
@@ -120,6 +124,7 @@ class Scaffolder
         $skippedFiles = [];
         $overrideFiles = [];
         $rawCopiedFiles = [];
+        /** @var array<string, array<int, string>> $unresolvedTokensMap */
         $unresolvedTokensMap = [];
         $totalFiles = count($stubsMap);
         $currentIndex = 0;
@@ -133,7 +138,9 @@ class Scaffolder
                 $targetRelPath = substr($targetRelPath, 0, -strlen($request->stubExtension));
             }
 
-            $destination = rtrim($request->target, '/\\').'/'.$targetRelPath;
+            $this->validateRelativePath($targetRelPath);
+
+            $destination = rtrim($target, '/\\').'/'.$targetRelPath;
             $exists = $this->files->exists($destination);
 
             if ($stubInfo['isOverride']) {
@@ -289,5 +296,25 @@ class Scaffolder
     {
         $this->files->ensureDirectoryExists($this->files->dirname($target));
         $this->files->copy($source, $target);
+    }
+
+    /**
+     * Validate that the interpolated relative path does not escape the target directory.
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function validateRelativePath(string $relativePath): void
+    {
+        $normalized = str_replace('\\', '/', $relativePath);
+        $segments = explode('/', $normalized);
+
+        if (
+            str_starts_with($normalized, '/')
+            || preg_match('/^[a-zA-Z]:[\/]/', $normalized) === 1
+            || in_array('..', $segments, true)
+            || str_contains($normalized, '..')
+        ) {
+            throw new InvalidArgumentException("Scaffold path escapes target directory: [{$relativePath}].");
+        }
     }
 }

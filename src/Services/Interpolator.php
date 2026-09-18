@@ -14,14 +14,31 @@ class Interpolator
     /** @var array<string, callable(string): string> */
     protected array $customModifiers = [];
 
+    public string $open;
+
+    public string $close;
+
+    /** @var array<string, mixed> */
+    public array $tokens;
+
+    /**
+     * @param  array<string, mixed>|null  $tokens
+     */
     public function __construct(
-        public ?string $open = null,
-        public ?string $close = null,
-        public ?array $tokens = null,
+        ?string $open = null,
+        ?string $close = null,
+        ?array $tokens = null,
     ) {
-        $this->open ??= (string) config('stub-engine.delimiters.open', '{{');
-        $this->close ??= (string) config('stub-engine.delimiters.close', '}}');
-        $this->tokens ??= (array) config('stub-engine.global_tokens', []);
+        $openConfig = config('stub-engine.delimiters.open', '{{');
+        $closeConfig = config('stub-engine.delimiters.close', '}}');
+        $tokensConfig = config('stub-engine.global_tokens', []);
+
+        /** @var array<string, mixed> $defaultTokens */
+        $defaultTokens = is_array($tokensConfig) ? $tokensConfig : [];
+
+        $this->open = $open ?? (is_string($openConfig) ? $openConfig : '{{');
+        $this->close = $close ?? (is_string($closeConfig) ? $closeConfig : '}}');
+        $this->tokens = $tokens ?? $defaultTokens;
     }
 
     /**
@@ -117,14 +134,14 @@ class Interpolator
      * @param  array<string, string>  $mergedTokens  Normalized token replacements
      * @param  string  $open  Effective open delimiter
      * @param  string  $close  Effective close delimiter
-     * @param  array<int, string>|null  $unresolved  Optional output reference for unresolved placeholders
+     * @param  array<int, string>  $unresolved  Optional output reference for unresolved placeholders
      */
     public function interpolateContent(
         string $content,
         array $mergedTokens,
         string $open,
         string $close,
-        ?array &$unresolved = null,
+        array &$unresolved = [],
     ): string {
         $escapedOpen = preg_quote($open, '/');
         $escapedClose = preg_quote($close, '/');
@@ -169,9 +186,7 @@ class Interpolator
             return $value;
         }, $content) ?? $content;
 
-        if ($unresolved !== null) {
-            $unresolved = array_values(array_unique($unresolvedList));
-        }
+        $unresolved = array_values(array_unique($unresolvedList));
 
         return $result;
     }
@@ -209,12 +224,12 @@ class Interpolator
      *
      * @param  string  $content  Template content or string with placeholders
      * @param  ScaffoldRequest  $request  ScaffoldRequest containing tokens and delimiters
-     * @param  array<int, string>|null  $unresolved  Optional output reference for unresolved placeholders
+     * @param  array<int, string>  $unresolved  Optional output reference for unresolved placeholders
      */
     public function interpolate(
         string $content,
         ScaffoldRequest $request,
-        ?array &$unresolved = null,
+        array &$unresolved = [],
     ): string {
         $open = $request->openDelimiter ?? $this->open;
         $close = $request->closeDelimiter ?? $this->close;

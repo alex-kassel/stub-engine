@@ -31,7 +31,7 @@ class StubEngine
     /**
      * Register a custom token modifier callback.
      *
-     * @param  callable(string, ...mixed): string  $callback
+     * @param  callable(string, mixed...): string  $callback
      */
     public function registerModifier(string $name, callable $callback): self
     {

@@ -25,6 +25,7 @@ final readonly class ScaffoldRequest implements Arrayable
      * @param  bool  $strict  Whether to throw on unresolved tokens
      * @param  string|null  $openDelimiter  Optional runtime open delimiter override
      * @param  string|null  $closeDelimiter  Optional runtime close delimiter override
+     * @param  array<int, string>  $ignoredFiles  List of filenames to ignore
      * @param  (Closure(string $relativePath, int $currentIndex, int $totalFiles): void)|null  $onProgress  Progress callback
      */
     public function __construct(
@@ -48,6 +49,7 @@ final readonly class ScaffoldRequest implements Arrayable
      */
     public function toArray(): array
     {
+        /** @var array<string, mixed> */
         return get_object_vars($this);
     }
 }

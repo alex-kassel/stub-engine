@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added
+- Path traversal security validation in `Scaffolder::validateRelativePath` preventing destination directory escape via malicious token paths.
+- Standalone package testing support with `tests/bootstrap.php` and explicit `require-dev` dependencies (`orchestra/testbench`, `phpunit/phpunit`).
+- GitHub Actions CI workflow matrix (`.github/workflows/run-tests.yml`) covering PHP 8.2–8.4 and stability matrix.
+
+### Fixed
+- Resolved all PHPStan static analysis errors across `Interpolator`, `Scaffolder`, `ScaffoldRequest`, and `ScaffoldBuilder` at `--level=max`.
+- Removed explicit `"version"` from `composer.json` for Packagist compliance.
+- Added `.audit/` to `.gitignore`.
+
 ### Changed
 - Refactored `ScaffoldResult` into a pure, lightweight readonly DTO with direct public typed properties (`$renderedFiles`, `$createdFiles`, `$overwrittenFiles`, `$skippedFiles`, `$overrideFiles`, `$rawCopiedFiles`, `$unresolvedTokens`).
 - Removed redundant helper methods from `ScaffoldResult` (`count()`, `toArray()`, `fileCount`, `hasCreated()`, `hasOverwritten()`, `hasSkipped()`, `hasOverrides()`, `hasRawCopied()`, `hasUnresolvedTokens()`, `successful()`, `isSuccessful()`).
