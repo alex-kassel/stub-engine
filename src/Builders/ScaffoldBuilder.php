@@ -18,8 +18,6 @@ class ScaffoldBuilder
     use Conditionable;
     use Macroable;
 
-    public const DEFAULT_VENDOR_STUBS_DIR = 'stubs/vendor';
-
     protected ?string $source = null;
 
     protected ?string $target = null;
@@ -89,35 +87,12 @@ class ScaffoldBuilder
     }
 
     /**
-     * Set the host override file or directory.
+     * Set the host override file or directory and optional override strategy.
      */
-    public function override(?string $override): self
+    public function override(?string $override, OverrideStrategy $strategy = OverrideStrategy::Overlay): self
     {
         $this->override = $override;
-
-        return $this;
-    }
-
-    /**
-     * Add token replacement(s).
-     *
-     * @param  array<string, mixed>|string  $key
-     */
-    public function with(array|string $key, mixed $value = null): self
-    {
-        if (is_array($key)) {
-            return $this->withTokens($key);
-        }
-
-        return $this->withToken($key, $value);
-    }
-
-    /**
-     * Set a single token replacement.
-     */
-    public function withToken(string $key, mixed $value): self
-    {
-        $this->tokens[$key] = (string) $value;
+        $this->strategy = $strategy;
 
         return $this;
     }
@@ -132,54 +107,6 @@ class ScaffoldBuilder
         foreach ($tokens as $key => $value) {
             $this->tokens[(string) $key] = (string) $value;
         }
-
-        return $this;
-    }
-
-    /**
-     * Automatically discover and activate host overrides according to package conventions:
-     * stubs/vendor/{package}/{subpath?}
-     *
-     * If the host directory exists, it is automatically configured with the Overlay strategy.
-     */
-    public function forPackage(string $package, ?string $subpath = null): self
-    {
-        $relativePath = self::DEFAULT_VENDOR_STUBS_DIR.'/'.trim($package, '/');
-        if ($subpath !== null) {
-            $relativePath .= '/'.trim($subpath, '/');
-        }
-
-        $overrideDir = base_path($relativePath);
-
-        if (is_dir($overrideDir)) {
-            $this->overlay($overrideDir);
-        }
-
-        return $this;
-    }
-
-    /**
-     * Set host overrides and activate the Overlay (cascading merge) strategy.
-     */
-    public function overlay(?string $override = null): self
-    {
-        if ($override !== null) {
-            $this->override = $override;
-        }
-        $this->strategy = OverrideStrategy::Overlay;
-
-        return $this;
-    }
-
-    /**
-     * Set host overrides and activate the Replace (all-or-nothing) strategy.
-     */
-    public function replace(?string $override = null): self
-    {
-        if ($override !== null) {
-            $this->override = $override;
-        }
-        $this->strategy = OverrideStrategy::Replace;
 
         return $this;
     }
@@ -255,14 +182,6 @@ class ScaffoldBuilder
         $this->onProgress = $callback !== null ? $callback(...) : null;
 
         return $this;
-    }
-
-    /**
-     * Access the underlying StubEngine coordinator.
-     */
-    public function engine(): StubEngine
-    {
-        return $this->engine;
     }
 
     /**

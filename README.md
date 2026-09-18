@@ -96,7 +96,7 @@ use AlexKassel\StubEngine\Facades\StubEngine;
 
 $result = StubEngine::from(__DIR__ . '/../stubs/runner.stub')
     ->to(base_path('bin/my-tool'))
-    ->with([
+    ->withTokens([
         '{{ runnerName }}' => 'my-tool',
         '{{ manifestPath }}' => 'tool.json',
     ])
@@ -144,7 +144,7 @@ use AlexKassel\StubEngine\Facades\StubEngine;
 
 $result = StubEngine::from(__DIR__ . '/../stubs')
     ->to(base_path('packages/acme/my-tool'))
-    ->with([
+    ->withTokens([
         '{{ vendor }}' => 'acme',
         '{{ package }}' => 'my-tool',
         '{{ ClassName }}' => 'MyTool',
@@ -330,7 +330,7 @@ Prevent broken PHP code caused by forgotten placeholder variables:
 try {
     StubEngine::from(__DIR__ . '/../stubs')
         ->to(app_path('Modules/Billing'))
-        ->with(['name' => 'Billing'])
+        ->withTokens(['name' => 'Billing'])
         ->strict() // Throws InvalidArgumentException on unresolved tokens
         ->scaffold();
 } catch (\InvalidArgumentException $e) {

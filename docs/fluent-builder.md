@@ -31,7 +31,7 @@ StubEngine::from($stubsDir)
     ->to($targetDir)
     ->withTokens(['module' => 'Billing'])
     ->when($withAuth, fn (ScaffoldBuilder $b) => $b->withTokens(['has_auth' => true]))
-    ->overlay($hostOverridesDir)
+    ->override($hostOverridesDir)
     ->force()
     ->scaffold();
 ```
@@ -168,60 +168,35 @@ StubEngine::from($stubs)
 ### 1. Overlay (Default Cascading Merge)
 Default and custom stubs are merged. Files in the host override directory take priority and replace matching default stubs, while stubs unique to the source package remain untouched:
 ```php
-$builder->overlay('/path/to/host/stubs');
+use AlexKassel\StubEngine\Enums\OverrideStrategy;
+
+// Default is Overlay:
+$builder->override('/path/to/host/stubs');
+
+// Explicit:
+$builder->override('/path/to/host/stubs', OverrideStrategy::Overlay);
 ```
 
 ### 2. Replace (All-or-Nothing Substitution)
 Completely substitutes the source directory with the override directory if it exists:
 ```php
-$builder->replace('/path/to/host/stubs');
+use AlexKassel\StubEngine\Enums\OverrideStrategy;
+
+$builder->override('/path/to/host/stubs', OverrideStrategy::Replace);
+
+// Or via explicit strategy method:
+$builder->override('/path/to/host/stubs')->strategy(OverrideStrategy::Replace);
 ```
 
 ---
 
-## 8. Package Convention Auto-Discovery (`forPackage`)
-
-### The Philosophy
-When developing Composer packages that generate code into a Laravel host application, users may want to customize your package's default templates.
-
-Laravel provides no native auto-discovery for stubs like it does for views (`loadViewsFrom`). `StubEngine` establishes a transparent convention:
-```text
-stubs/vendor/{vendor}/{package}/{subpath?}
-```
-
-The method `forPackage(string $package, ?string $subpath = null)` is pure syntactic sugar around `overlay()`:
-1. It looks for `base_path("stubs/vendor/{$package}")`.
-2. If the directory exists on disk, it automatically registers it as `->overlay(...)`.
-3. If the directory does not exist, it silently proceeds with default stubs without error.
-
-### Full Tree Scaffolding with Convention Discovery
-```php
-StubEngine::from(__DIR__ . '/../stubs')
-    ->to(base_path())
-    ->forPackage('alex-kassel/billing')
-    ->scaffold();
-```
-* If host user created `stubs/vendor/alex-kassel/billing/Invoice.php.stub`, that file overrides the package's default `Invoice.php.stub`.
-* All other stubs in `__DIR__ . '/../stubs'` are generated from the package defaults.
-
-### Sub-path Scaffolding
-When scaffolding a specific sub-resource (such as only configuration or only service providers):
-```php
-StubEngine::from(__DIR__ . '/../stubs/configs')
-    ->to(config_path())
-    ->forPackage('alex-kassel/billing', subpath: 'configs')
-    ->scaffold();
-```
-This automatically inspects `stubs/vendor/alex-kassel/billing/configs`.
-
----
-
-## 9. Execution Endpoints
+## 8. Execution Endpoints
 
 | Method | Return Type | Description |
 | :--- | :--- | :--- |
 | `scaffold()` | `ScaffoldResult` | Executes file or directory tree scaffolding according to the source type. |
 | `renderFile()` | `string` | Renders a single stub file into a string in memory without writing to disk. |
+| `toRequest()` | `ScaffoldRequest` | Compiles current builder state into an immutable `ScaffoldRequest` DTO. |
 
 ### Additional Operational Controls
 * `force(bool $force = true)`: Allow overwriting existing files (default: `false`).
@@ -229,5 +204,6 @@ This automatically inspects `stubs/vendor/alex-kassel/billing/configs`.
 * `strict(bool $strict = true)`: Throw an `InvalidArgumentException` if any unresolved placeholder remains (default: `false`).
 * `stubExtension(string $extension)`: Change the file extension stripped upon output (default: `'.stub'`).
 * `delimiters(string $open, string $close)`: Override token delimiters at runtime (e.g. `<%` and `%>`).
+* `ignore(array $files)`: Filter out specific filenames during directory crawling.
 * `onProgress(?callable $callback)`: Register a progress hook `fn (string $path, int $index, int $total)` for CLI progress bars.
 

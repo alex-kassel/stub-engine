@@ -7,6 +7,7 @@ namespace AlexKassel\StubEngine\Tests;
 use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
 use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
+use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use AlexKassel\StubEngine\StubEngine;
 use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
@@ -44,7 +45,7 @@ class ScaffoldBuilderTest extends TestCase
         $builder2 = $this->engine->from($this->tempDir);
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder2);
 
-        $builder3 = $this->engine->from($this->tempDir)->forPackage('alex-kassel/test-pkg');
+        $builder3 = $this->engine->from($this->tempDir)->override('/path');
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder3);
     }
 
@@ -169,7 +170,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->engine
             ->from($sourceDir)
             ->to($targetDir)
-            ->overlay($overrideDir)
+            ->override($overrideDir)
             ->scaffold();
 
         $this->assertSame('Source A', $this->files->get($targetDir.'/a.txt'));
@@ -182,53 +183,21 @@ class ScaffoldBuilderTest extends TestCase
         $this->engine
             ->from($sourceDir)
             ->to($targetDir)
-            ->replace($overrideDir)
+            ->override($overrideDir, OverrideStrategy::Replace)
             ->scaffold();
 
         $this->assertFileDoesNotExist($targetDir.'/a.txt');
         $this->assertSame('Override B', $this->files->get($targetDir.'/b.txt'));
     }
 
-    public function test_for_package_auto_discovers_host_stubs_when_directory_exists(): void
-    {
-        $sourceDir = $this->tempDir.'/source';
-        $targetDir = $this->tempDir.'/target';
-        $this->files->ensureDirectoryExists($sourceDir);
-        $this->files->put($sourceDir.'/config.php.stub', 'default config');
-
-        // Simulate host override convention: stubs/vendor/alex-kassel/test-pkg
-        $conventionOverride = $this->tempDir.'/stubs/vendor/alex-kassel/test-pkg';
-        $this->files->ensureDirectoryExists($conventionOverride);
-        $this->files->put($conventionOverride.'/config.php.stub', 'customized host config');
-
-        // When directory exists at the custom path
-        $builder = app(ScaffoldBuilder::class);
-        $builder->overlay($conventionOverride);
-        $result = $builder
-            ->from($sourceDir)
-            ->to($targetDir)
-            ->scaffold();
-
-        $this->assertInstanceOf(ScaffoldResult::class, $result);
-        $this->assertSame('customized host config', $this->files->get($targetDir.'/config.php'));
-        $this->assertContains('config.php', $result->overrideFiles);
-    }
-
-    public function test_for_package_gracefully_ignores_non_existent_host_directory(): void
+    public function test_builder_override_with_explicit_strategy(): void
     {
         $builder = app(ScaffoldBuilder::class);
-        $builder->forPackage('nonexistent/package-name');
+        $builder->override('/custom/path', OverrideStrategy::Replace);
 
-        // Strategy should still default to Overlay, but no error thrown
-        $this->assertInstanceOf(ScaffoldBuilder::class, $builder);
-    }
-
-    public function test_for_package_supports_subpath(): void
-    {
-        $builder = app(ScaffoldBuilder::class);
-        $builder->forPackage('alex-kassel/test-pkg', 'configs');
-
-        $this->assertInstanceOf(ScaffoldBuilder::class, $builder);
+        $request = $builder->from('/source')->to('/target')->toRequest();
+        $this->assertSame('/custom/path', $request->override);
+        $this->assertSame(OverrideStrategy::Replace, $request->strategy);
     }
 
     public function test_strict_mode_throws_on_unresolved_tokens(): void
