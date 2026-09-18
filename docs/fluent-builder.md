@@ -58,7 +58,7 @@ $builder = StubEngine::newBuilder();
 
 ### Via Dependency Injection
 ```php
-use AlexKassel\StubEngine\Services\StubEngine;
+use AlexKassel\StubEngine\StubEngine;
 
 class MakeModuleCommand extends Command
 {
@@ -220,10 +220,8 @@ This automatically inspects `stubs/vendor/alex-kassel/billing/configs`.
 
 | Method | Return Type | Description |
 | :--- | :--- | :--- |
-| `scaffold()` | `ScaffoldResult\|bool` | Automatically invokes `scaffoldTree()` if directories are set, or `scaffoldFile()` if single files are set. |
-| `scaffoldTree()` | `ScaffoldResult` | Executes directory tree generation, returning detailed audit stats. |
-| `scaffoldFile()` | `bool` | Executes single file generation, returning `true` on write, `false` if skipped. |
-| `render()` | `string` | Renders a single stub template into a string in memory without writing to disk. |
+| `scaffold()` | `ScaffoldResult` | Executes file or directory tree scaffolding according to the source type. |
+| `renderFile()` | `string` | Renders a single stub file into a string in memory without writing to disk. |
 
 ### Additional Operational Controls
 * `force(bool $force = true)`: Allow overwriting existing files (default: `false`).

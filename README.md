@@ -57,9 +57,9 @@ Generators, module builders, manifest installers, and CLI scaffolding tools repe
   * Define application-wide global tokens (e.g. `company_name`, `year`, `author`) in `config/stub-engine.php`.
   * Runtime tokens seamlessly merge and take precedence over global tokens.
 * **Dual-Axis Token Interpolation:** Replace tokens in both file contents AND file/directory pathnames simultaneously (e.g. `src/<% Module|studly %>.php.stub`).
-* **Security & Path Traversal Protection:** Path normalization and validation guarantee that interpolated paths cannot escape the target destination directory.
+* **Path Normalization:** Cross-platform path handling for seamless generation on Windows, macOS, and Linux.
 * **Binary & Raw Asset Protection:** Files without `.stub` extension are safely copied without string interpolation, and system junk files (`.DS_Store`, `Thumbs.db`, `.gitkeep`) are automatically filtered out.
-* **Strict Diagnostics Mode:** Detect unreplaced placeholders in generated templates via `findUnresolvedTokens()`, or pass `strict: true` to fail fast before deploying broken code.
+* **Strict Diagnostics Mode:** Discover required tokens in templates via `extractTokens()`, or pass `strict: true` to fail fast before deploying broken code.
 * **Safe Overwrite & Dry-Run Modes:** Prevent accidental file overwrites (`force: false`) and simulate execution non-destructively for CLI commands (`dryRun: true`).
 * **Decoupled Architecture:** Pure constructor DI with `Illuminate\Filesystem\Filesystem` and array config. Usable across Laravel console commands, service providers, background jobs, or standalone pure PHP CLI tools.
 * **Rich, Countable DTOs:** Returns a typed `ScaffoldResult` object implementing `\Countable` with granular file status arrays (`createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`, `rawCopiedFiles`, `unresolvedTokens`) and expressive inspection methods.
@@ -94,18 +94,17 @@ If you are using Laravel, the service provider and `StubEngine` facade are autom
 ```php
 use AlexKassel\StubEngine\Facades\StubEngine;
 
-$created = StubEngine::scaffoldFile(
-    sourceFile: __DIR__ . '/../stubs/runner.stub',
-    targetFile: base_path('bin/my-tool'),
-    tokens: [
+$result = StubEngine::from(__DIR__ . '/../stubs/runner.stub')
+    ->to(base_path('bin/my-tool'))
+    ->with([
         '{{ runnerName }}' => 'my-tool',
         '{{ manifestPath }}' => 'tool.json',
-    ],
-    overrideFile: base_path('stubs/runner.stub'), // Optional host override
-    force: false, // Skip if target file already exists
-);
+    ])
+    ->override(base_path('stubs/runner.stub')) // Optional host override
+    ->force(false) // Skip if target file already exists
+    ->scaffold();
 
-if ($created) {
+if ($result->successful()) {
     echo "Standalone runner created at bin/my-tool!";
 }
 ```
@@ -113,15 +112,16 @@ if ($created) {
 ### 2. Render In-Memory Content from a Stub
 
 ```php
+use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\Facades\StubEngine;
 
-$compiled = StubEngine::renderFile(
-    sourceFile: __DIR__ . '/../stubs/config.stub',
+$compiled = StubEngine::renderFile(new ScaffoldRequest(
+    source: __DIR__ . '/../stubs/config.stub',
     tokens: [
         '{{ appName }}' => 'My Application',
     ],
-    overrideFile: base_path('stubs/config.stub'),
-);
+    override: base_path('stubs/config.stub'),
+));
 ```
 
 ### 3. Scaffold a Complete Directory Tree
@@ -142,16 +142,15 @@ Execute scaffolding:
 ```php
 use AlexKassel\StubEngine\Facades\StubEngine;
 
-$result = StubEngine::scaffoldTree(
-    sourceDir: __DIR__ . '/../stubs',
-    targetDir: base_path('packages/acme/my-tool'),
-    tokens: [
+$result = StubEngine::from(__DIR__ . '/../stubs')
+    ->to(base_path('packages/acme/my-tool'))
+    ->with([
         '{{ vendor }}' => 'acme',
         '{{ package }}' => 'my-tool',
         '{{ ClassName }}' => 'MyTool',
-    ],
-    overrideDir: base_path('stubs/my-generator'),
-);
+    ])
+    ->override(base_path('stubs/my-generator'))
+    ->scaffold();
 
 echo "Rendered {$result->fileCount} files into {$result->targetDir}!";
 ```
@@ -162,12 +161,12 @@ echo "Rendered {$result->fileCount} files into {$result->targetDir}!";
 
 ### 1. Dependency Injection in Console Commands
 
-In clean architecture, inject `AlexKassel\StubEngine\Services\StubEngine` directly into your console commands:
+In clean architecture, inject `AlexKassel\StubEngine\StubEngine` directly into your console commands:
 
 ```php
 namespace Acme\Generator\Console;
 
-use AlexKassel\StubEngine\Services\StubEngine;
+use AlexKassel\StubEngine\StubEngine;
 use Illuminate\Console\Command;
 
 class MakeModuleCommand extends Command
@@ -322,26 +321,25 @@ StubEngine::registerModifier('shout', fn (string $val): string => strtoupper($va
 // In stubs: {{ title|slug }} or {{ alert|shout }}
 ```
 
-### 6. Strict Mode & Unresolved Token Diagnostics
+### 6. Strict Mode Diagnostics
 
 Prevent broken PHP code caused by forgotten placeholder variables:
 
 ```php
-// 1. Detect unresolved placeholders programmatically
-$unresolved = StubEngine::findUnresolvedTokens($content);
-// Returns: ['{{ missing_token }}', '{{ other|studly }}']
-
-// 2. Strict scaffolding (fails fast if any placeholder is missing)
+// 1. Strict scaffolding (fails fast if any placeholder is missing)
 try {
-    StubEngine::scaffoldTree(
-        sourceDir: __DIR__ . '/../stubs',
-        targetDir: app_path('Modules/Billing'),
-        tokens: ['name' => 'Billing'],
-        strict: true, // Throws InvalidArgumentException on unresolved tokens
-    );
+    StubEngine::from(__DIR__ . '/../stubs')
+        ->to(app_path('Modules/Billing'))
+        ->with(['name' => 'Billing'])
+        ->strict() // Throws InvalidArgumentException on unresolved tokens
+        ->scaffold();
 } catch (\InvalidArgumentException $e) {
     // Gracefully report missing inputs to CLI user
 }
+
+// 2. Direct token diagnostics on raw strings using StubEngine or Interpolator
+$tokens = StubEngine::extractTokens($content);
+// Returns: ['missing_token', 'other']
 ```
 
 ### 7. Inspecting Scaffold Results & Dry-Run Mode
@@ -385,103 +383,33 @@ if ($result->isReplace()) {
 
 ## API Reference
 
+### `StubEngine::from`
+
+```php
+public function from(string $source): ScaffoldBuilder
+```
+
+Starts a fluent scaffolding pipeline for a source stub file or directory.
+
+---
+
 ### `StubEngine::renderFile`
 
 ```php
-public function renderFile(
-    string $sourceFile,
-    array $tokens,
-    ?string $overrideFile = null,
-    ?string $openDelimiter = null,
-    ?string $closeDelimiter = null,
-    bool $strict = false,
-): string
+public function renderFile(ScaffoldRequest $request): string
 ```
 
-Renders a single stub file into a string with token replacements.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `$sourceFile` | `string` | *(required)* | Path to the default fallback stub file. |
-| `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
-| `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
-| `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter (falls back to config or `{{`). |
-| `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter (falls back to config or `}}`). |
-| `$strict` | `bool` | `false` | When `true`, throws `InvalidArgumentException` if any placeholders remain unreplaced. |
-
-*Throws `InvalidArgumentException` if neither the override file nor the source file exists.*
+Renders a single stub file into a string with token replacements using a `ScaffoldRequest` DTO. Throws `InvalidArgumentException` if the source is a directory.
 
 ---
 
-### `StubEngine::scaffoldFile`
+### `StubEngine::scaffold`
 
 ```php
-public function scaffoldFile(
-    string $sourceFile,
-    string $targetFile,
-    array $tokens,
-    ?string $overrideFile = null,
-    bool $force = false,
-    bool $dryRun = false,
-    ?string $openDelimiter = null,
-    ?string $closeDelimiter = null,
-    bool $strict = false,
-): bool
+public function scaffold(ScaffoldRequest $request): ScaffoldResult
 ```
 
-Scaffolds a single stub file to a target destination with token replacements.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `$sourceFile` | `string` | *(required)* | Path to the default fallback stub file. |
-| `$targetFile` | `string` | *(required)* | Destination path for the rendered file. |
-| `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
-| `$overrideFile` | `?string` | `null` | Optional host override file. If present on disk, it takes precedence. |
-| `$force` | `bool` | `false` | When `false`, skips existing files. When `true`, overwrites them. |
-| `$dryRun` | `bool` | `false` | When `true`, simulates execution without touching disk. |
-| `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter. |
-| `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter. |
-| `$strict` | `bool` | `false` | When `true`, throws `InvalidArgumentException` on unresolved tokens. |
-
-*Returns `true` if the file was written (or simulated), or `false` if skipped because it already existed.*
-
----
-
-### `StubEngine::scaffoldTree`
-
-```php
-public function scaffoldTree(
-    string $sourceDir,
-    string $targetDir,
-    array $tokens,
-    ?string $overrideDir = null,
-    OverrideStrategy $strategy = OverrideStrategy::Overlay,
-    string $stubExtension = StubEngine::DEFAULT_STUB_EXTENSION,
-    bool $force = false,
-    bool $dryRun = false,
-    ?string $openDelimiter = null,
-    ?string $closeDelimiter = null,
-    bool $strict = false,
-): ScaffoldResult
-```
-
-Scaffolds a complete directory tree from stubs with configurable strategy (`Overlay` vs `Replace`), dual-axis token replacements, safe overwrite controls, path traversal security, and raw non-stub asset protection.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `$sourceDir` | `string` | *(required)* | Path to the default fallback stubs directory. |
-| `$targetDir` | `string` | *(required)* | Target directory where rendered files will be generated. |
-| `$tokens` | `array<string, string>` | *(required)* | Key-value dictionary of placeholder tokens and their replacements. |
-| `$overrideDir` | `?string` | `null` | Optional host override directory. |
-| `$strategy` | `OverrideStrategy` | `OverrideStrategy::Overlay` | Override strategy (`Overlay` for cascading merge, `Replace` for total substitution). |
-| `$stubExtension` | `string` | `StubEngine::DEFAULT_STUB_EXTENSION` (`'.stub'`) | Extension stripped from output filenames. Pass `''` to preserve extensions. |
-| `$force` | `bool` | `false` | When `false`, skips existing files. When `true`, overwrites them. |
-| `$dryRun` | `bool` | `false` | When `true`, simulates execution without touching disk. |
-| `$openDelimiter` | `?string` | `null` | Optional runtime opening delimiter. |
-| `$closeDelimiter` | `?string` | `null` | Optional runtime closing delimiter. |
-| `$strict` | `bool` | `false` | When `true`, throws `InvalidArgumentException` if unresolved tokens are encountered. |
-
-*Throws `InvalidArgumentException` if the source directory does not exist or if path traversal is attempted.*
+Executes scaffolding for either a single file or a complete directory tree (automatically determined from `$request->source`). Returns a `ScaffoldResult` object detailing created, overwritten, and skipped files.
 
 ---
 
@@ -491,21 +419,19 @@ Scaffolds a complete directory tree from stubs with configurable strategy (`Over
 public function registerModifier(string $name, callable $callback): self
 ```
 
-Registers a custom runtime token modifier function (e.g. `{{ var|name }}`).
+Registers a custom runtime token modifier function (e.g. `{{ var|name }}`) delegated to the `Interpolator` service.
 
----
-
-### `StubEngine::findUnresolvedTokens`
-
+### `StubEngine::extractTokens`
+ 
 ```php
-public function findUnresolvedTokens(
+public function extractTokens(
     string $content,
-    ?string $openDelimiter = null,
-    ?string $closeDelimiter = null,
+    ?string $open = null,
+    ?string $close = null,
 ): array
 ```
 
-Scans a string and extracts all unresolved placeholder tokens.
+Scans raw template or generated content and returns an array of unique unescaped token names (before any modifier pipes) found within delimiters.
 
 ---
 

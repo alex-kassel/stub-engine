@@ -29,7 +29,7 @@ All of the above produce identical output.
 
 ## 2. Built-in String Modifiers
 
-`StubEngine` comes with 9 built-in case and grammatical string transformers powered by Laravel's `Illuminate\Support\Str`:
+`StubEngine` comes with 10 built-in string transformers powered by Laravel's `Illuminate\Support\Str`:
 
 | Modifier | Input Example (`"user profile"`) | Output Example | Typical Use Case |
 | :--- | :--- | :--- | :--- |
@@ -42,6 +42,10 @@ All of the above produce identical output.
 | `title` | `"user profile"` | `User Profile` | Human-readable headers, titles |
 | `plural` | `"user profile"` | `user profiles` | Pluralized words |
 | `singular` | `"user profiles"` | `user profile` | Singularized words |
+| `trim` | `"  user profile  "` | `user profile` | Stripping surrounding whitespace |
+
+> [!NOTE]
+> Modifiers are simple string transformations. If an unrecognized modifier is encountered, `StubEngine` immediately throws an `\InvalidArgumentException` to prevent silent bugs from typos.
 
 ---
 
@@ -74,80 +78,20 @@ You can chain multiple modifiers sequentially using multiple pipes (`|`). Transf
 
 ---
 
-## 4. Parameterized Modifiers
-
-Modifiers support optional parameters using colon-separated argument syntax:
-
-```text
-{{ token | modifier:arg1,arg2 }}
-```
-
-When evaluated, the engine splits the directive by colon (`:`), extracts comma-separated arguments, trims them, and passes them to the modifier handler.
-
-### Built-in Parameterized Modifiers
-
-`StubEngine` includes 6 built-in parameterized utility modifiers:
-
-| Modifier | Syntax | Input Example | Output Example | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `default` | `default:value` | `""` | `"App\\Models"` | Fallback default if token value is empty string. |
-| `format` / `date` | `format:format_string` | `"2026-09-16 12:00:00"` | `"2026"` | Formats timestamps and dates using Carbon (`default: Y-m-d`). |
-| `replace` | `replace:search,replace` | `"app\\Domain\\Models"` | `"app/Domain/Models"` | Replaces occurrences of search string with replacement. |
-| `limit` | `limit:count,end` | `"The quick brown fox"` | `"The quick..."` | Truncates string using `Str::limit()` (`default: 100, "..."`). |
-| `wrap` | `wrap:before,after` | `"ALERT"` | `"[ALERT!]"` | Wraps value with prefix and suffix (`wrap:"` wraps in quotes). |
-| `trim` | `trim:characters` | `"__clean__"` | `"clean"` | Trims whitespace or specified characters. |
-
-### Practical Examples
-
-```text
-// 1. Fallback default
-namespace {{ namespace | default:App\\Models }};
-
-// 2. Date formatting
-Copyright (c) {{ timestamp | format:Y }} {{ author }}
-
-// 3. Path normalization
-Path: {{ win_path | replace:\\,/ }}
-
-// 4. Content limit and wrapping
-Summary: {{ description | limit:50,... | wrap:" }}
-
-// 5. Chaining parameterized and case modifiers
-Table: {{ model | default:billing_item | snake | plural }}
-```
-
----
-
-## 5. Registering Custom Modifiers
+## 4. Registering Custom Modifiers
 
 You can register custom modifier callbacks at runtime using `StubEngine::registerModifier()`:
 
 ```php
 use AlexKassel\StubEngine\Facades\StubEngine;
 
-// 1. Simple modifier without arguments
+// Register custom string transformation
 StubEngine::registerModifier('reverse', function (string $value): string {
     return strrev($value);
 });
 
 // Template: {{ name | reverse }}
 // Input: 'John' -> Output: 'nhoJ'
-
-// 2. Parameterized modifier with arguments
-StubEngine::registerModifier('prefix', function (string $value, string $prefix = ''): string {
-    return $prefix . $value;
-});
-
-// Template: {{ order_id | prefix:ORD- }}
-// Input: '123' -> Output: 'ORD-123'
-
-// 3. Multi-argument modifier
-StubEngine::registerModifier('wrap', function (string $value, string $before = '', string $after = ''): string {
-    return $before . $value . $after;
-});
-
-// Template: {{ item | wrap:<tag>,</tag> }}
-// Input: 'Title' -> Output: '<tag>Title</tag>'
 ```
 
 ### Chaining Custom and Built-in Modifiers
@@ -165,7 +109,7 @@ Input: `'Hello World'` -> Step 1: `'hello-world'` -> Step 2: `'HELLO-WORLD'`.
 
 ---
 
-## 6. Token Modifiers in File and Directory Paths
+## 5. Token Modifiers in File and Directory Paths
 
 Modifiers work identically in file and directory paths during tree scaffolding:
 
@@ -181,14 +125,14 @@ stubs/
         └── create_{{ model|snake|plural }}_table.php.stub
 ```
 
-When scaffolded with `['model' => 'order item']`, this generates:
+When scaffolded with `tokens: ['model' => 'order item']`, this generates:
 * `src/Actions/CreateOrderItemAction.php`
 * `src/Models/OrderItem.php`
 * `database/migrations/create_order_items_table.php`
 
 ---
 
-## 7. Performance & Architecture Note
+## 6. Performance & Architecture Note
 
 `StubEngine` uses a single-pass `preg_replace_callback` parser. Unlike naive replacement systems that build permutation dictionaries, `StubEngine`:
 1. Scans template content exactly once ($O(N)$).
@@ -198,7 +142,7 @@ When scaffolded with `['model' => 'order item']`, this generates:
 
 ---
 
-## 8. Escaping & Blade Template Compatibility
+## 7. Escaping & Blade Template Compatibility
 
 When scaffolding Laravel applications, stub files often contain native Blade expressions:
 
@@ -218,5 +162,5 @@ Because Blade uses the same default delimiters (`{{` and `}}`), `StubEngine` pro
 ### How Escaping Works
 1. **Stripping `@`**: During interpolation, `@{{ ... }}` is converted directly to `{{ ... }}` on disk.
 2. **Bypassing Modifiers**: No token lookups or modifiers are evaluated inside escaped expressions.
-3. **Strict Mode Safety**: Escaped expressions are ignored by `findUnresolvedTokens()`, preventing false-positive exceptions when scaffolding in `strict: true` mode.
+3. **Strict Mode Safety**: Escaped expressions are ignored by `extractTokens()`, preventing false-positive exceptions when scaffolding in `strict: true` mode.
 4. **Custom Delimiters**: If you configure custom delimiters (such as `<% %>` or `[[ ]]`), native Blade tags `{{ $user->name }}` do not collide at all and require no escaping. However, `@` escaping is supported for any configured open delimiter (e.g. `@<% verbatim %>` -> `<% verbatim %>`).
