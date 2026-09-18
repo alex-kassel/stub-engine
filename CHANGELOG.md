@@ -4,7 +4,7 @@ All notable changes to `alex-kassel/stub-engine` will be documented in this file
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [Unreleased]
+## [v1.0.0] - 2026-09-18
 
 ### Added
 - Path traversal security validation in `Scaffolder::validateRelativePath` preventing destination directory escape via malicious token paths.
@@ -13,13 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Resolved all PHPStan static analysis errors across `Interpolator`, `Scaffolder`, `ScaffoldRequest`, and `ScaffoldBuilder` at `--level=max`.
+- Cross-platform Windows filesystem compatibility for custom token delimiters in test suite.
 - Removed explicit `"version"` from `composer.json` for Packagist compliance.
 - Added `.audit/` to `.gitignore`.
 
 ### Changed
 - Refactored `ScaffoldResult` into a pure, lightweight readonly DTO with direct public typed properties (`$renderedFiles`, `$createdFiles`, `$overwrittenFiles`, `$skippedFiles`, `$overrideFiles`, `$rawCopiedFiles`, `$unresolvedTokens`).
 - Removed redundant helper methods from `ScaffoldResult` (`count()`, `toArray()`, `fileCount`, `hasCreated()`, `hasOverwritten()`, `hasSkipped()`, `hasOverrides()`, `hasRawCopied()`, `hasUnresolvedTokens()`, `successful()`, `isSuccessful()`).
-- Refactored `ScaffoldBuilder` internal state encapsulation to initialize from `ScaffoldRequest` defaults via `$this->options = app(ScaffoldRequest::class, ['source' => ''])->toArray()`.
+- Refactored `ScaffoldBuilder` internal state encapsulation to use strongly typed properties.
 - Unified `override(string $override, OverrideStrategy $strategy = OverrideStrategy::Merge)` in `ScaffoldBuilder`, eliminating redundant `strategy()` method and enforcing non-nullable override paths.
 
 ### Documentation
