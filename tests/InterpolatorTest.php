@@ -4,38 +4,89 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\Tests;
 
-use AlexKassel\StubEngine\Engines\Interpolator;
+use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
+use AlexKassel\StubEngine\Services\Interpolator;
+use InvalidArgumentException;
 
 class InterpolatorTest extends TestCase
 {
     public function test_interpolator_resolves_delimiters_and_merged_tokens(): void
     {
-        $interpolator = new Interpolator([
-            'delimiters' => [
-                'open' => '[[',
-                'close' => ']]',
-            ],
-            'global_tokens' => [
+        $interpolator = new Interpolator(
+            open: '[[',
+            close: ']]',
+            tokens: [
                 'app' => 'TestApp',
             ],
-        ]);
+        );
 
-        [$open, $close] = $interpolator->resolveDelimiters();
-        $this->assertSame('[[', $open);
-        $this->assertSame(']]', $close);
+        $this->assertSame('[[', $interpolator->open);
+        $this->assertSame(']]', $interpolator->close);
 
-        $merged = $interpolator->getMergedTokens(['version' => '1.0']);
+        $merged = $interpolator->getMergedTokens(new ScaffoldRequest(source: 'memory', tokens: ['version' => '1.0']));
         $this->assertArrayHasKey('app', $merged);
         $this->assertArrayHasKey('version', $merged);
     }
 
-    public function test_interpolator_handles_modifier_chains_and_parameterized_directives(): void
+    public function test_interpolator_handles_modifier_chains(): void
     {
         $interpolator = new Interpolator;
 
-        $template = '{{ model | default:Order | snake | upper }}';
-        $result = $interpolator->interpolate($template, ['model' => '']);
-        $this->assertSame('ORDER', $result);
+        $template = '{{ model | snake | upper }}';
+        $result = $interpolator->interpolate($template, new ScaffoldRequest(source: 'memory', tokens: ['model' => 'orderItem']));
+        $this->assertSame('ORDER_ITEM', $result);
+    }
+
+    public function test_interpolator_throws_on_unknown_modifier(): void
+    {
+        $interpolator = new Interpolator;
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unknown token modifier [unknownModifier].');
+
+        $interpolator->interpolate(
+            '{{ model | unknownModifier }}',
+            new ScaffoldRequest(source: 'memory', tokens: ['model' => 'Order'])
+        );
+    }
+
+    public function test_interpolator_validates_token_keys_do_not_contain_pipe(): void
+    {
+        $interpolator = new Interpolator;
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Token key [name|studly] cannot contain modifier pipe '|'.");
+
+        $interpolator->getMergedTokens(new ScaffoldRequest(
+            source: 'memory',
+            tokens: ['name|studly' => 'User']
+        ));
+    }
+
+    public function test_interpolator_validates_token_values_are_scalar(): void
+    {
+        $interpolator = new Interpolator;
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Token [items] must be a string or scalar, [array] given.');
+
+        $interpolator->getMergedTokens(new ScaffoldRequest(
+            source: 'memory',
+            tokens: ['items' => ['one', 'two']]
+        ));
+    }
+
+    public function test_interpolator_registers_custom_modifiers(): void
+    {
+        $interpolator = new Interpolator;
+        $interpolator->registerModifier('reverse', fn (string $val): string => strrev($val));
+
+        $result = $interpolator->interpolate(
+            '{{ word | reverse | upper }}',
+            new ScaffoldRequest(source: 'memory', tokens: ['word' => 'hello'])
+        );
+
+        $this->assertSame('OLLEH', $result);
     }
 
     public function test_interpolator_correctly_interpolates_tokens_with_hyphens_and_dots(): void
@@ -46,10 +97,13 @@ class InterpolatorTest extends TestCase
         $unresolved = [];
         $result = $interpolator->interpolate(
             content: $template,
-            tokens: [
-                'package-name' => 'billing-module',
-                'app.domain' => 'example.com',
-            ],
+            request: new ScaffoldRequest(
+                source: 'memory',
+                tokens: [
+                    'package-name' => 'billing-module',
+                    'app.domain' => 'example.com',
+                ],
+            ),
             unresolved: $unresolved,
         );
 
@@ -60,20 +114,30 @@ class InterpolatorTest extends TestCase
         );
     }
 
-    public function test_date_modifier_formats_valid_dates(): void
+    public function test_interpolator_accepts_scaffold_request_and_extracts_tokens(): void
     {
-        $interpolator = new Interpolator;
+        $interpolator = new Interpolator(
+            tokens: ['company' => 'Acme'],
+        );
 
-        $template = '{{ created_at | date:Y-m-d }}';
-        $result = $interpolator->interpolate($template, ['created_at' => '2026-09-17 10:00:00']);
-        $this->assertSame('2026-09-17', $result);
-    }
+        $scaffold = new ScaffoldRequest(
+            source: 'stub.stub',
+            tokens: ['name' => 'Widget'],
+            openDelimiter: '<%',
+            closeDelimiter: '%>',
+        );
 
-    public function test_date_modifier_throws_exception_on_unparseable_date(): void
-    {
-        $interpolator = new Interpolator;
+        $merged = $interpolator->getMergedTokens($scaffold);
+        $this->assertSame(['company' => 'Acme', 'name' => 'Widget'], $merged);
 
-        $this->expectException(\InvalidArgumentException::class);
-        $interpolator->interpolate('{{ created_at | date:Y-m-d }}', ['created_at' => 'not-a-valid-date']);
+        $rendered = $interpolator->interpolate('<% name %> by <% company %>', $scaffold);
+        $this->assertSame('Widget by Acme', $rendered);
+
+        $unresolved = [];
+        $partiallyRendered = $interpolator->interpolate('<% name %> and <% missing | upper %>', $scaffold, unresolved: $unresolved);
+        $this->assertSame(['<% missing | upper %>'], $unresolved);
+
+        $extracted = $interpolator->extractTokens($partiallyRendered, '<%', '%>');
+        $this->assertSame(['missing'], $extracted);
     }
 }

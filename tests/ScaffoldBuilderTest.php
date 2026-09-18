@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace AlexKassel\StubEngine\Tests;
 
 use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
+use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
-use AlexKassel\StubEngine\Services\StubEngine;
+use AlexKassel\StubEngine\StubEngine;
 use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
-use PHPUnit\Framework\TestCase;
 
 class ScaffoldBuilderTest extends TestCase
 {
@@ -25,7 +25,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->files = new Filesystem;
         $this->tempDir = sys_get_temp_dir().'/stub_engine_builder_test_'.bin2hex(random_bytes(6));
         $this->files->ensureDirectoryExists($this->tempDir);
-        $this->engine = new StubEngine($this->files);
+        $this->engine = $this->engine();
     }
 
     protected function tearDown(): void
@@ -36,19 +36,16 @@ class ScaffoldBuilderTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_builder_can_be_instantiated_via_factory_methods(): void
+    public function test_builder_can_be_instantiated(): void
     {
-        $builder1 = $this->engine->newBuilder();
+        $builder1 = app(ScaffoldBuilder::class);
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder1);
 
         $builder2 = $this->engine->from($this->tempDir);
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder2);
 
-        $builder3 = $this->engine->fromFile($this->tempDir.'/file.stub');
+        $builder3 = $this->engine->from($this->tempDir)->forPackage('alex-kassel/test-pkg');
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder3);
-
-        $builder4 = $this->engine->from($this->tempDir)->forPackage('alex-kassel/test-pkg');
-        $this->assertInstanceOf(ScaffoldBuilder::class, $builder4);
     }
 
     public function test_builder_accumulates_tokens_via_with_tokens(): void
@@ -58,7 +55,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->files->ensureDirectoryExists($sourceDir);
         $this->files->put($sourceDir.'/sample.txt.stub', 'Hello {{ name }}, welcome to {{ place }} on {{ day }}!');
 
-        $result = $this->engine->newBuilder()
+        $result = $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->withTokens(['name' => 'Alice', 'place' => 'Wonderland', 'day' => 'Monday'])
@@ -79,7 +76,7 @@ class ScaffoldBuilderTest extends TestCase
         $isProduction = true;
         $isDebug = false;
 
-        $result = $this->engine->newBuilder()
+        $result = $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->when($isProduction, function (ScaffoldBuilder $builder): void {
@@ -106,7 +103,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->files->ensureDirectoryExists($sourceDir);
         $this->files->put($sourceDir.'/book.txt.stub', 'Author: {{ author }}');
 
-        $this->engine->newBuilder()
+        $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->withAuthor('Alex Kassel')
@@ -121,17 +118,18 @@ class ScaffoldBuilderTest extends TestCase
         $targetFile = $this->tempDir.'/output/MyClass.php';
         $this->files->put($sourceFile, '<?php class {{ class }} {}');
 
-        $builder = $this->engine->newBuilder()
-            ->fromFile($sourceFile)
-            ->toFile($targetFile)
+        $builder = $this->engine
+            ->from($sourceFile)
+            ->to($targetFile)
             ->withTokens(['class' => 'MyClass']);
 
-        $rendered = $builder->render();
+        $rendered = $builder->renderFile();
         $this->assertSame('<?php class MyClass {}', $rendered);
         $this->assertFileDoesNotExist($targetFile);
 
         $scaffolded = $builder->scaffold();
-        $this->assertTrue($scaffolded);
+        $this->assertInstanceOf(ScaffoldResult::class, $scaffolded);
+        $this->assertTrue($scaffolded->successful());
         $this->assertFileExists($targetFile);
         $this->assertSame('<?php class MyClass {}', $this->files->get($targetFile));
     }
@@ -143,14 +141,14 @@ class ScaffoldBuilderTest extends TestCase
         $this->files->ensureDirectoryExists($sourceDir);
         $this->files->put($sourceDir.'/item.txt.stub', 'Content');
 
-        $result = $this->engine->newBuilder()
+        $result = $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->dryRun()
             ->scaffold();
 
         $this->assertInstanceOf(ScaffoldResult::class, $result);
-        $this->assertTrue($result->dryRun);
+        $this->assertTrue($result->request->dryRun);
         $this->assertFileDoesNotExist($targetDir.'/item.txt');
     }
 
@@ -168,7 +166,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->files->put($overrideDir.'/b.txt.stub', 'Override B');
 
         // Overlay strategy: a.txt and override b.txt exist
-        $this->engine->newBuilder()
+        $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->overlay($overrideDir)
@@ -181,7 +179,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->files->cleanDirectory($targetDir);
 
         // Replace strategy: only b.txt from overrideDir exists
-        $this->engine->newBuilder()
+        $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->replace($overrideDir)
@@ -204,7 +202,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->files->put($conventionOverride.'/config.php.stub', 'customized host config');
 
         // When directory exists at the custom path
-        $builder = $this->engine->newBuilder();
+        $builder = app(ScaffoldBuilder::class);
         $builder->overlay($conventionOverride);
         $result = $builder
             ->from($sourceDir)
@@ -218,7 +216,7 @@ class ScaffoldBuilderTest extends TestCase
 
     public function test_for_package_gracefully_ignores_non_existent_host_directory(): void
     {
-        $builder = $this->engine->newBuilder();
+        $builder = app(ScaffoldBuilder::class);
         $builder->forPackage('nonexistent/package-name');
 
         // Strategy should still default to Overlay, but no error thrown
@@ -227,7 +225,7 @@ class ScaffoldBuilderTest extends TestCase
 
     public function test_for_package_supports_subpath(): void
     {
-        $builder = $this->engine->newBuilder();
+        $builder = app(ScaffoldBuilder::class);
         $builder->forPackage('alex-kassel/test-pkg', 'configs');
 
         $this->assertInstanceOf(ScaffoldBuilder::class, $builder);
@@ -243,7 +241,7 @@ class ScaffoldBuilderTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('Unresolved tokens in [template.txt]: {{ missing_token }}');
 
-        $this->engine->newBuilder()
+        $this->engine
             ->from($sourceDir)
             ->to($targetDir)
             ->strict()
@@ -253,16 +251,114 @@ class ScaffoldBuilderTest extends TestCase
     public function test_missing_from_or_to_throws_invalid_argument_exception(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Both source directory (from) and target directory (to) must be specified for tree scaffolding.');
+        $this->expectExceptionMessage('Source must be specified via from().');
 
-        $this->engine->newBuilder()->scaffoldTree();
+        app(ScaffoldBuilder::class)->scaffold();
     }
 
-    public function test_missing_source_file_throws_invalid_argument_exception_on_render(): void
+    public function test_missing_source_file_throws_invalid_argument_exception_on_render_file(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Source file must be specified via fromFile() to render.');
+        $this->expectExceptionMessage('Source must be specified via from().');
 
-        $this->engine->newBuilder()->render();
+        app(ScaffoldBuilder::class)->renderFile();
+    }
+
+    public function test_builder_render_file_throws_exception_when_source_is_directory(): void
+    {
+        $dir = $this->tempDir.'/some_tree_dir';
+        $this->files->ensureDirectoryExists($dir);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Cannot render directory [{$dir}] as a file. The renderFile() method only supports single stub files.");
+
+        $this->engine->from($dir)->renderFile();
+    }
+
+    public function test_unified_from_and_to_handles_both_file_and_directory(): void
+    {
+        // 1. Single file via unified from() and to()
+        $sourceFile = $this->tempDir.'/unified.stub';
+        $targetFile = $this->tempDir.'/output/unified.txt';
+        $this->files->put($sourceFile, 'Unified {{ type }}');
+
+        $fileResult = $this->engine->from($sourceFile)
+            ->to($targetFile)
+            ->withTokens(['type' => 'File'])
+            ->scaffold();
+
+        $this->assertInstanceOf(ScaffoldResult::class, $fileResult);
+        $this->assertTrue($fileResult->successful());
+        $this->assertSame('Unified File', $this->files->get($targetFile));
+
+        // 2. Directory tree via unified from() and to()
+        $sourceDir = $this->tempDir.'/unified_tree';
+        $targetDir = $this->tempDir.'/output/tree';
+        $this->files->ensureDirectoryExists($sourceDir);
+        $this->files->put($sourceDir.'/hello.txt.stub', 'Hello {{ type }}');
+
+        $treeResult = $this->engine->from($sourceDir)
+            ->to($targetDir)
+            ->withTokens(['type' => 'Tree'])
+            ->scaffold();
+
+        $this->assertInstanceOf(ScaffoldResult::class, $treeResult);
+        $this->assertTrue($treeResult->successful());
+        $this->assertSame('Hello Tree', $this->files->get($targetDir.'/hello.txt'));
+    }
+
+    public function test_direct_scaffold_request_execution(): void
+    {
+        $source = $this->tempDir.'/direct.stub';
+        $target = $this->tempDir.'/output/direct.txt';
+        $this->files->put($source, 'Direct {{ mode }}');
+
+        $request = new ScaffoldRequest(
+            source: $source,
+            target: $target,
+            tokens: ['mode' => 'Request'],
+        );
+
+        $result = $this->engine->scaffold($request);
+        $this->assertTrue($result->successful());
+        $this->assertSame('Direct Request', $this->files->get($target));
+    }
+
+    public function test_engine_render_file_method(): void
+    {
+        $source = $this->tempDir.'/render_test.stub';
+        $this->files->put($source, 'Render {{ item }}');
+
+        $rendered = $this->engine->renderFile(new ScaffoldRequest(source: $source, tokens: ['item' => 'Output']));
+        $this->assertSame('Render Output', $rendered);
+    }
+
+    public function test_scaffold_tree_on_progress_callback_is_invoked_for_each_file(): void
+    {
+        $sourceDir = $this->tempDir.'/progress_source';
+        $targetDir = $this->tempDir.'/progress_target';
+        $this->files->ensureDirectoryExists($sourceDir);
+        $this->files->put($sourceDir.'/file1.txt.stub', '1');
+        $this->files->put($sourceDir.'/file2.txt.stub', '2');
+        $this->files->put($sourceDir.'/raw.bin', 'RAW');
+
+        $progressCalls = [];
+
+        $this->engine->from($sourceDir)
+            ->to($targetDir)
+            ->onProgress(function (string $relativePath, int $index, int $total) use (&$progressCalls): void {
+                $progressCalls[] = [
+                    'file' => $relativePath,
+                    'index' => $index,
+                    'total' => $total,
+                ];
+            })
+            ->scaffold();
+
+        $this->assertCount(3, $progressCalls);
+        $this->assertSame(3, $progressCalls[0]['total']);
+        $this->assertSame(1, $progressCalls[0]['index']);
+        $this->assertSame(2, $progressCalls[1]['index']);
+        $this->assertSame(3, $progressCalls[2]['index']);
     }
 }

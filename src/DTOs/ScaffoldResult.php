@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\DTOs;
 
-use AlexKassel\StubEngine\Enums\OverrideStrategy;
 use Countable;
 
 final readonly class ScaffoldResult implements Countable
@@ -14,39 +13,26 @@ final readonly class ScaffoldResult implements Countable
 
     public int $fileCount;
 
-    public bool $isOverride;
-
     /**
-     * @param  string  $sourceDir  Default template source directory
-     * @param  string  $targetDir  Target destination directory
+     * @param  ScaffoldRequest  $request  The request that initiated the scaffolding
      * @param  array<int, string>  $createdFiles  Relative paths of freshly created files
      * @param  array<int, string>  $overwrittenFiles  Relative paths of overwritten files
      * @param  array<int, string>  $skippedFiles  Relative paths of skipped files
      * @param  array<int, string>  $overrideFiles  Relative paths of files resolved from override directory
      * @param  array<int, string>  $rawCopiedFiles  Relative paths of raw/binary files copied without interpolation
      * @param  array<string, array<int, string>>  $unresolvedTokens  Map of relative file paths to any unreplaced token placeholders
-     * @param  bool  $dryRun  Whether the operation was simulated without disk writes
-     * @param  OverrideStrategy  $strategy  The override strategy used (Overlay or Replace)
-     * @param  array<int, string>  $warnings  Any operational warnings encountered during scaffolding
-     * @param  bool  $formatted  Whether generated code was formatted by Pint
      */
     public function __construct(
-        public string $sourceDir,
-        public string $targetDir,
+        public ScaffoldRequest $request,
         public array $createdFiles = [],
         public array $overwrittenFiles = [],
         public array $skippedFiles = [],
         public array $overrideFiles = [],
         public array $rawCopiedFiles = [],
         public array $unresolvedTokens = [],
-        public bool $dryRun = false,
-        public OverrideStrategy $strategy = OverrideStrategy::Overlay,
-        public array $warnings = [],
-        public bool $formatted = false,
     ) {
         $this->renderedFiles = array_values(array_unique(array_merge($this->createdFiles, $this->overwrittenFiles)));
         $this->fileCount = count($this->renderedFiles);
-        $this->isOverride = $this->overrideFiles !== [];
     }
 
     /**
@@ -58,19 +44,19 @@ final readonly class ScaffoldResult implements Countable
     }
 
     /**
-     * Total number of rendered files.
-     */
-    public function totalFiles(): int
-    {
-        return $this->fileCount;
-    }
-
-    /**
      * Check if any files were resolved from host overrides.
      */
     public function hasOverrides(): bool
     {
         return $this->overrideFiles !== [];
+    }
+
+    /**
+     * Check if any new files were created.
+     */
+    public function hasCreated(): bool
+    {
+        return $this->createdFiles !== [];
     }
 
     /**
@@ -90,6 +76,14 @@ final readonly class ScaffoldResult implements Countable
     }
 
     /**
+     * Check if the operation was successful (created or overwritten at least one file).
+     */
+    public function successful(): bool
+    {
+        return $this->hasCreated() || $this->hasOverwritten();
+    }
+
+    /**
      * Check if any files have unresolved token placeholders.
      */
     public function hasUnresolvedTokens(): bool
@@ -103,37 +97,5 @@ final readonly class ScaffoldResult implements Countable
     public function hasRawCopied(): bool
     {
         return $this->rawCopiedFiles !== [];
-    }
-
-    /**
-     * Check if the strategy was Replace.
-     */
-    public function isReplace(): bool
-    {
-        return $this->strategy === OverrideStrategy::Replace;
-    }
-
-    /**
-     * Check if the strategy was Overlay.
-     */
-    public function isOverlay(): bool
-    {
-        return $this->strategy === OverrideStrategy::Overlay;
-    }
-
-    /**
-     * Check if any operational warnings were generated.
-     */
-    public function hasWarnings(): bool
-    {
-        return $this->warnings !== [];
-    }
-
-    /**
-     * Check if generated files were successfully formatted.
-     */
-    public function isFormatted(): bool
-    {
-        return $this->formatted;
     }
 }

@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace AlexKassel\StubEngine\Builders;
 
+use AlexKassel\StubEngine\DTOs\ScaffoldRequest;
 use AlexKassel\StubEngine\DTOs\ScaffoldResult;
 use AlexKassel\StubEngine\Enums\OverrideStrategy;
-use AlexKassel\StubEngine\Services\StubEngine;
+use AlexKassel\StubEngine\StubEngine;
 use Closure;
 use Illuminate\Support\Traits\Conditionable;
 use Illuminate\Support\Traits\Macroable;
@@ -19,56 +20,35 @@ class ScaffoldBuilder
 
     public const DEFAULT_VENDOR_STUBS_DIR = 'stubs/vendor';
 
-    public const DEFAULT_STUB_EXTENSION = StubEngine::DEFAULT_STUB_EXTENSION;
+    protected ?string $source = null;
 
-    public const DEFAULT_STRATEGY = OverrideStrategy::Overlay;
+    protected ?string $target = null;
 
-    public const DEFAULT_FORCE = false;
-
-    public const DEFAULT_DRY_RUN = false;
-
-    public const DEFAULT_STRICT = false;
-
-    public const DEFAULT_FORMAT_WITH_PINT = false;
-
-    public const DEFAULT_FORMAT_STRICT = false;
-
-    protected ?string $sourceDir = null;
-
-    protected ?string $targetDir = null;
-
-    protected ?string $sourceFile = null;
-
-    protected ?string $targetFile = null;
+    protected ?string $override = null;
 
     /**
      * @var array<string, string>
      */
     protected array $tokens = [];
 
-    protected ?string $overrideDir = null;
+    protected OverrideStrategy $strategy = OverrideStrategy::Overlay;
 
-    protected ?string $overrideFile = null;
+    protected string $stubExtension = '.stub';
 
-    protected OverrideStrategy $strategy = self::DEFAULT_STRATEGY;
+    protected bool $force = false;
 
-    protected string $stubExtension = self::DEFAULT_STUB_EXTENSION;
+    protected bool $dryRun = false;
 
-    protected bool $force = self::DEFAULT_FORCE;
-
-    protected bool $dryRun = self::DEFAULT_DRY_RUN;
-
-    protected bool $strict = self::DEFAULT_STRICT;
-
-    protected bool $formatWithPint = self::DEFAULT_FORMAT_WITH_PINT;
-
-    protected bool $formatStrict = self::DEFAULT_FORMAT_STRICT;
-
-    protected ?string $pintBinary = null;
+    protected bool $strict = false;
 
     protected ?string $openDelimiter = null;
 
     protected ?string $closeDelimiter = null;
+
+    /**
+     * @var array<int, string>
+     */
+    protected array $ignoredFiles = [];
 
     protected ?Closure $onProgress = null;
 
@@ -77,41 +57,67 @@ class ScaffoldBuilder
     ) {}
 
     /**
-     * Set the source directory containing default stubs.
+     * Set files to ignore during directory crawling.
+     *
+     * @param  array<int, string>  $files
      */
-    public function from(string $sourceDir): self
+    public function ignore(array $files): self
     {
-        $this->sourceDir = $sourceDir;
+        $this->ignoredFiles = array_values(array_unique(array_merge($this->ignoredFiles, $files)));
 
         return $this;
     }
 
     /**
-     * Set the target directory where scaffolded files will be generated.
+     * Set the source stub file or directory.
      */
-    public function to(string $targetDir): self
+    public function from(string $source): self
     {
-        $this->targetDir = $targetDir;
+        $this->source = $source;
 
         return $this;
     }
 
     /**
-     * Set the source stub file for single-file scaffolding.
+     * Set the target destination file or directory.
      */
-    public function fromFile(string $sourceFile): self
+    public function to(string $target): self
     {
-        $this->sourceFile = $sourceFile;
+        $this->target = $target;
 
         return $this;
     }
 
     /**
-     * Set the target destination file for single-file scaffolding.
+     * Set the host override file or directory.
      */
-    public function toFile(string $targetFile): self
+    public function override(?string $override): self
     {
-        $this->targetFile = $targetFile;
+        $this->override = $override;
+
+        return $this;
+    }
+
+    /**
+     * Add token replacement(s).
+     *
+     * @param  array<string, mixed>|string  $key
+     */
+    public function with(array|string $key, mixed $value = null): self
+    {
+        if (is_array($key)) {
+            return $this->withTokens($key);
+        }
+
+        return $this->withToken($key, $value);
+    }
+
+    /**
+     * Set a single token replacement.
+     */
+    public function withToken(string $key, mixed $value): self
+    {
+        $this->tokens[$key] = (string) $value;
 
         return $this;
     }
@@ -153,12 +159,12 @@ class ScaffoldBuilder
     }
 
     /**
-     * Set host overrides directory and activate the Overlay (cascading merge) strategy.
+     * Set host overrides and activate the Overlay (cascading merge) strategy.
      */
-    public function overlay(?string $overrideDir = null): self
+    public function overlay(?string $override = null): self
     {
-        if ($overrideDir !== null) {
-            $this->overrideDir = $overrideDir;
+        if ($override !== null) {
+            $this->override = $override;
         }
         $this->strategy = OverrideStrategy::Overlay;
 
@@ -166,12 +172,12 @@ class ScaffoldBuilder
     }
 
     /**
-     * Set host overrides directory and activate the Replace (all-or-nothing) strategy.
+     * Set host overrides and activate the Replace (all-or-nothing) strategy.
      */
-    public function replace(?string $overrideDir = null): self
+    public function replace(?string $override = null): self
     {
-        if ($overrideDir !== null) {
-            $this->overrideDir = $overrideDir;
+        if ($override !== null) {
+            $this->override = $override;
         }
         $this->strategy = OverrideStrategy::Replace;
 
@@ -184,26 +190,6 @@ class ScaffoldBuilder
     public function strategy(OverrideStrategy $strategy): self
     {
         $this->strategy = $strategy;
-
-        return $this;
-    }
-
-    /**
-     * Set the host override directory.
-     */
-    public function overrideDir(?string $overrideDir): self
-    {
-        $this->overrideDir = $overrideDir;
-
-        return $this;
-    }
-
-    /**
-     * Set the host override file for single-file scaffolding.
-     */
-    public function overrideFile(?string $overrideFile): self
-    {
-        $this->overrideFile = $overrideFile;
 
         return $this;
     }
@@ -260,25 +246,6 @@ class ScaffoldBuilder
     }
 
     /**
-     * Configure post-scaffolding code formatting using Laravel Pint.
-     *
-     * @param  bool  $enabled  Whether to run Laravel Pint on generated PHP files
-     * @param  bool  $strict  Whether to throw an exception if Pint is missing or fails
-     * @param  string|null  $binary  Optional custom path to the Pint executable
-     */
-    public function formatWithPint(
-        bool $enabled = true,
-        bool $strict = self::DEFAULT_FORMAT_STRICT,
-        ?string $binary = null,
-    ): self {
-        $this->formatWithPint = $enabled;
-        $this->formatStrict = $strict;
-        $this->pintBinary = $binary;
-
-        return $this;
-    }
-
-    /**
      * Register a progress callback invoked during tree scaffolding.
      *
      * @param  (callable(string $relativePath, int $currentIndex, int $totalFiles): void)|null  $callback
@@ -299,99 +266,50 @@ class ScaffoldBuilder
     }
 
     /**
-     * Render the single stub file into a string without writing to disk.
+     * Render the source stub file into a string without writing to disk.
      *
      * @throws InvalidArgumentException
      */
-    public function render(): string
+    public function renderFile(): string
     {
-        if ($this->sourceFile === null) {
-            throw new InvalidArgumentException('Source file must be specified via fromFile() to render.');
-        }
-
-        return $this->engine->renderFile(
-            sourceFile: $this->sourceFile,
-            tokens: $this->tokens,
-            overrideFile: $this->overrideFile,
-            openDelimiter: $this->openDelimiter,
-            closeDelimiter: $this->closeDelimiter,
-            strict: $this->strict,
-        );
+        return $this->engine->renderFile($this->toRequest());
     }
 
     /**
-     * Scaffold a single file.
+     * Build the immutable ScaffoldRequest DTO from configured builder state.
      *
      * @throws InvalidArgumentException
      */
-    public function scaffoldFile(?string $sourceFile = null, ?string $targetFile = null): bool
+    public function toRequest(): ScaffoldRequest
     {
-        $source = $sourceFile ?? $this->sourceFile;
-        $target = $targetFile ?? $this->targetFile;
-
-        if ($source === null || $target === null) {
-            throw new InvalidArgumentException('Both source and target files must be specified via fromFile()/toFile() or passed directly.');
+        if ($this->source === null) {
+            throw new InvalidArgumentException('Source must be specified via from().');
         }
 
-        return $this->engine->scaffoldFile(
-            sourceFile: $source,
-            targetFile: $target,
+        return new ScaffoldRequest(
+            source: $this->source,
+            target: $this->target,
             tokens: $this->tokens,
-            overrideFile: $this->overrideFile,
-            force: $this->force,
-            dryRun: $this->dryRun,
-            openDelimiter: $this->openDelimiter,
-            closeDelimiter: $this->closeDelimiter,
-            strict: $this->strict,
-            formatWithPint: $this->formatWithPint,
-            formatStrict: $this->formatStrict,
-            pintBinary: $this->pintBinary,
-            targetDir: $this->targetDir,
-        );
-    }
-
-    /**
-     * Scaffold a complete directory tree.
-     *
-     * @throws InvalidArgumentException
-     */
-    public function scaffoldTree(): ScaffoldResult
-    {
-        if ($this->sourceDir === null || $this->targetDir === null) {
-            throw new InvalidArgumentException('Both source directory (from) and target directory (to) must be specified for tree scaffolding.');
-        }
-
-        return $this->engine->scaffoldTree(
-            sourceDir: $this->sourceDir,
-            targetDir: $this->targetDir,
-            tokens: $this->tokens,
-            overrideDir: $this->overrideDir,
+            override: $this->override,
             strategy: $this->strategy,
             stubExtension: $this->stubExtension,
             force: $this->force,
             dryRun: $this->dryRun,
+            strict: $this->strict,
             openDelimiter: $this->openDelimiter,
             closeDelimiter: $this->closeDelimiter,
-            strict: $this->strict,
-            formatWithPint: $this->formatWithPint,
-            formatStrict: $this->formatStrict,
-            pintBinary: $this->pintBinary,
+            ignoredFiles: $this->ignoredFiles,
             onProgress: $this->onProgress,
         );
     }
 
     /**
-     * Execute scaffolding: automatically delegates to scaffoldFile() or scaffoldTree()
-     * based on configured source targets.
+     * Execute scaffolding and return the detailed ScaffoldResult DTO.
      *
      * @throws InvalidArgumentException
      */
-    public function scaffold(): ScaffoldResult|bool
+    public function scaffold(): ScaffoldResult
     {
-        if ($this->sourceFile !== null && $this->targetFile !== null) {
-            return $this->scaffoldFile();
-        }
-
-        return $this->scaffoldTree();
+        return $this->engine->scaffold($this->toRequest());
     }
 }
