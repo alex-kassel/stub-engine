@@ -4,10 +4,10 @@
     "package": "alex-kassel/stub-engine",
     "version": "1.0.0",
     "audit": {
-        "commit": "28c62352cd10a8cc1b81145e1c24356b14b17df2",
-        "tree_hash": "8c6ba599692484cde8fef8e498a1f9cc83232f94",
+        "commit": "d87d016130082dd0ec75e8dbc82e418efa272114",
+        "tree_hash": "d929995e583d9b9ef09a63b59d0fda840c03f122",
         "branch": "main",
-        "timestamp": "2026-09-18T19:25:31+00:00",
+        "timestamp": "2026-09-18T19:39:51+00:00",
         "environment": {
             "php": "8.3.28",
             "laravel": "13.31.0",
@@ -20,35 +20,35 @@
             "package": "alex-kassel/stub-engine",
             "status": "passed",
             "output": "packages/alex-kassel/stub-engine/composer.json is valid",
-            "duration_seconds": 0.231
+            "duration_seconds": 0.212
         },
         "pint": {
             "check": "pint",
             "package": "alex-kassel/stub-engine",
             "status": "passed",
             "output": "{\"tool\":\"pint\",\"result\":\"passed\"}",
-            "duration_seconds": 0.193
+            "duration_seconds": 0.184
         },
         "phpstan": {
             "check": "phpstan",
             "package": "alex-kassel/stub-engine",
             "status": "passed",
             "output": "{\"tool\":\"phpstan\",\"result\":\"passed\",\"errors\":0}",
-            "duration_seconds": 1.578
+            "duration_seconds": 1.524
         },
         "tests": {
             "check": "tests",
             "package": "alex-kassel/stub-engine",
             "status": "passed",
-            "output": "{\"tool\":\"phpunit\",\"result\":\"passed\",\"tests\":70,\"passed\":70,\"assertions\":234,\"duration_ms\":386}",
-            "duration_seconds": 0.513
+            "output": "{\"tool\":\"phpunit\",\"result\":\"passed\",\"tests\":70,\"passed\":70,\"assertions\":234,\"duration_ms\":307}",
+            "duration_seconds": 0.43
         },
         "isolated": {
             "check": "isolated",
             "package": "alex-kassel/stub-engine",
             "status": "passed",
-            "output": "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.\n\nRuntime:       PHP 8.3.28\nConfiguration: /private/var/folders/px/ykxw69555z9_pgw_yyv14fxh0000gn/T/wdt-isolated-74aba959c1cff44aab1bbb51/project/phpunit.xml.dist\n\n................................................................. 65 / 70 ( 92%)\n.....                                                             70 / 70 (100%)\n\nTime: 00:00.342, Memory: 28.00 MB\n\nOK (70 tests, 234 assertions)\n",
-            "duration_seconds": 9.444
+            "output": "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.\n\nRuntime:       PHP 8.3.28\nConfiguration: /private/var/folders/px/ykxw69555z9_pgw_yyv14fxh0000gn/T/wdt-isolated-d247038bddd62f6ce1730e61/project/phpunit.xml.dist\n\n................................................................. 65 / 70 ( 92%)\n.....                                                             70 / 70 (100%)\n\nTime: 00:00.333, Memory: 28.00 MB\n\nOK (70 tests, 234 assertions)\n",
+            "duration_seconds": 9.026
         },
         "git_cleanliness": {
             "check": "git_cleanliness",
@@ -62,7 +62,7 @@
             "package": "alex-kassel/stub-engine",
             "status": "passed",
             "output": "README matches configured standard sections.",
-            "duration_seconds": 0.002
+            "duration_seconds": 0.001
         },
         "export_ignore": {
             "check": "export_ignore",
@@ -73,5 +73,5 @@
         }
     },
     "verdict": "PASSED",
-    "fingerprint": "sha256:f8bbcf16d63c208a8f279d47d5ef6c0a951391a2f99b7d62356619b712da0960"
+    "fingerprint": "sha256:dbe2f6ba933c36f5c1f7f110e74d1738f08c9b5d1f1e17c6d70c1f17b885d17f"
 }
