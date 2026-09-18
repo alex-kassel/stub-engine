@@ -4,6 +4,18 @@ All notable changes to `alex-kassel/stub-engine` will be documented in this file
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
+
+### Changed
+- Refactored `ScaffoldResult` into a pure, lightweight readonly DTO with direct public typed properties (`$renderedFiles`, `$createdFiles`, `$overwrittenFiles`, `$skippedFiles`, `$overrideFiles`, `$rawCopiedFiles`, `$unresolvedTokens`).
+- Removed redundant helper methods from `ScaffoldResult` (`count()`, `toArray()`, `fileCount`, `hasCreated()`, `hasOverwritten()`, `hasSkipped()`, `hasOverrides()`, `hasRawCopied()`, `hasUnresolvedTokens()`, `successful()`, `isSuccessful()`).
+- Refactored `ScaffoldBuilder` internal state encapsulation to initialize from `ScaffoldRequest` defaults via `$this->options = app(ScaffoldRequest::class, ['source' => ''])->toArray()`.
+- Unified `override(string $override, OverrideStrategy $strategy = OverrideStrategy::Merge)` in `ScaffoldBuilder`, eliminating redundant `strategy()` method and enforcing non-nullable override paths.
+
+### Documentation
+- Updated `README.md` and all guides in `docs/` to reflect current public API truth (`from()`, `to()`, `withTokens()`, `override()`, direct `ScaffoldResult` property inspection).
+- Added `StubEngine::extractTokens()` API reference in `docs/stub-engine.md`.
+- Added comprehensive `ScaffoldResult` inspection section in `docs/fluent-builder.md`.
 
 ## [v0.1.0] - 2026-09-15
 

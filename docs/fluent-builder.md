@@ -40,25 +40,20 @@ StubEngine::from($stubsDir)
 
 ## 2. Instantiation & Entry Points
 
-`ScaffoldBuilder` can be created through the Laravel Facade or via Dependency Injection:
+`ScaffoldBuilder` is initiated through the `StubEngine` Facade, direct dependency injection, or container resolution:
 
 ### Via Laravel Facade
 ```php
 use AlexKassel\StubEngine\Facades\StubEngine;
 
-// Start directory tree scaffolding
-$builder = StubEngine::from('/path/to/stubs');
-
-// Start single file scaffolding
-$builder = StubEngine::fromFile('/path/to/Class.php.stub');
-
-// Start blank builder
-$builder = StubEngine::newBuilder();
+// Start directory tree or single file scaffolding
+$builder = StubEngine::from('/path/to/source');
 ```
 
 ### Via Dependency Injection
 ```php
 use AlexKassel\StubEngine\StubEngine;
+use Illuminate\Console\Command;
 
 class MakeModuleCommand extends Command
 {
@@ -66,7 +61,7 @@ class MakeModuleCommand extends Command
     {
         $engine->from(__DIR__ . '/../stubs')
             ->to(app_path('Modules/Billing'))
-            ->withTokens(['name' => $this->argument('name')])
+            ->withTokens(['name' => (string) $this->argument('name')])
             ->scaffold();
 
         return self::SUCCESS;
@@ -74,13 +69,21 @@ class MakeModuleCommand extends Command
 }
 ```
 
+### Via Container Resolution
+```php
+use AlexKassel\StubEngine\Builders\ScaffoldBuilder;
+
+$builder = app(ScaffoldBuilder::class);
+```
+
 ---
 
 ## 3. Configuring Sources and Destinations
 
+`ScaffoldBuilder` uses a unified, symmetric `from()` and `to()` API that automatically adapts depending on whether the source is a file or a directory:
+
 ### Directory Tree Scaffolding
-* `from(string $sourceDir)`: Set the source directory containing default stubs and static assets.
-* `to(string $targetDir)`: Set the target destination directory where files will be created.
+When `$source` is a directory, the engine crawls all stubs within the hierarchy and mirrors the tree into the target directory:
 
 ```php
 StubEngine::from(__DIR__ . '/../stubs')
@@ -88,13 +91,12 @@ StubEngine::from(__DIR__ . '/../stubs')
     ->scaffold();
 ```
 
-### Single File Scaffolding & Rendering
-* `fromFile(string $sourceFile)`: Set the source template stub.
-* `toFile(string $targetFile)`: Set the target destination path.
+### Single File Scaffolding
+When `$source` is a single file, the engine renders it and writes to the specific target file path:
 
 ```php
-StubEngine::fromFile(__DIR__ . '/../stubs/config.php.stub')
-    ->toFile(config_path('my-package.php'))
+StubEngine::from(__DIR__ . '/../stubs/config.php.stub')
+    ->to(config_path('my-package.php'))
     ->withTokens(['prefix' => 'api/v1'])
     ->scaffold();
 ```
@@ -203,4 +205,42 @@ $builder->override('/path/to/host/stubs', OverrideStrategy::Replace);
 * `delimiters(string $open, string $close)`: Override token delimiters at runtime (e.g. `<%` and `%>`).
 * `ignore(array $files)`: Filter out specific filenames during directory crawling.
 * `onProgress(?callable $callback)`: Register a progress hook `fn (string $path, int $index, int $total)` for CLI progress bars.
+
+---
+
+## 9. Inspecting the ScaffoldResult DTO
+
+The `scaffold()` method returns a lightweight, pure `AlexKassel\StubEngine\DTOs\ScaffoldResult` object. All properties are strongly typed and `public readonly`, allowing transparent inspection without getter methods:
+
+```php
+$result = StubEngine::from($stubs)
+    ->to($target)
+    ->withTokens(['name' => 'Order'])
+    ->scaffold();
+
+// 1. Files created and overwritten:
+$rendered = $result->renderedFiles;    // string[] (unique created + overwritten)
+$count    = count($result->renderedFiles);
+
+// 2. Granular status arrays:
+$created     = $result->createdFiles;     // string[]
+$overwritten = $result->overwrittenFiles; // string[]
+$skipped     = $result->skippedFiles;     // string[]
+$overrides   = $result->overrideFiles;    // string[]
+$rawCopied   = $result->rawCopiedFiles;   // string[]
+$unresolved  = $result->unresolvedTokens; // array<string, string[]>
+
+// 3. Simple, explicit conditionals:
+if ($result->renderedFiles !== []) {
+    echo "Successfully generated {$count} files!";
+}
+
+if ($result->overrideFiles !== []) {
+    echo "Custom host stubs were used for: " . implode(', ', $result->overrideFiles);
+}
+
+if ($result->skippedFiles !== []) {
+    echo "Protected existing files: " . implode(', ', $result->skippedFiles);
+}
+```
 

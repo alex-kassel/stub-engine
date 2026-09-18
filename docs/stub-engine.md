@@ -46,7 +46,7 @@ use AlexKassel\StubEngine\Facades\StubEngine;
 
 StubEngine::from(__DIR__ . '/../stubs/Module')
     ->to(app_path('Modules/Billing'))
-    ->with(['module' => 'Billing'])
+    ->withTokens(['module' => 'Billing'])
     ->scaffold();
 ```
 
@@ -108,6 +108,23 @@ use AlexKassel\StubEngine\Facades\StubEngine;
 StubEngine::registerModifier('shout', fn (string $val): string => strtoupper($val) . '!!!');
 
 // Inside stubs: {{ title | shout }}
+```
+
+---
+
+### `StubEngine::extractTokens`
+
+```php
+public function extractTokens(string $content, ?string $open = null, ?string $close = null): array
+```
+
+Scans raw template content and returns an array of unique unescaped token names (stripped of any modifier directives) found within delimiters. Ignores escaped `@{{ ... }}` expressions:
+
+```php
+use AlexKassel\StubEngine\Facades\StubEngine;
+
+$tokens = StubEngine::extractTokens('Hello {{ name | studly }} and {{ role }} but ignore @{{ blade }}');
+// Returns: ['name', 'role']
 ```
 
 ---
@@ -175,7 +192,7 @@ StubEngine::macro('scaffoldDomainModule', function (string $moduleName) {
     /** @var \AlexKassel\StubEngine\StubEngine $this */
     return $this->from(base_path('stubs/domain-module'))
         ->to(app_path("Domain/{$moduleName}"))
-        ->with([
+        ->withTokens([
             'module'       => $moduleName,
             'module_snake' => str($moduleName)->snake()->toString(),
             'module_slug'  => str($moduleName)->kebab()->toString(),

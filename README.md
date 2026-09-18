@@ -11,10 +11,10 @@
   <a href="#installation">Installation</a> •
   <a href="#quickstart">Quickstart</a> •
   <a href="#usage--recipes">Usage & Recipes</a> •
+  <a href="#documentation">Documentation</a> •
   <a href="#api-reference">API Reference</a> •
   <a href="#testing">Testing</a> •
-  <a href=".dev/USE-CASES.md">Use Cases</a> •
-  <a href=".dev/ROADMAP.md">Roadmap</a> •
+  <a href="CHANGELOG.md">Changelog</a> •
   <a href="LICENSE.md">License</a>
 </p>
 
@@ -62,7 +62,7 @@ Generators, module builders, manifest installers, and CLI scaffolding tools repe
 * **Strict Diagnostics Mode:** Discover required tokens in templates via `extractTokens()`, or pass `strict: true` to fail fast before deploying broken code.
 * **Safe Overwrite & Dry-Run Modes:** Prevent accidental file overwrites (`force: false`) and simulate execution non-destructively for CLI commands (`dryRun: true`).
 * **Decoupled Architecture:** Pure constructor DI with `Illuminate\Filesystem\Filesystem` and array config. Usable across Laravel console commands, service providers, background jobs, or standalone pure PHP CLI tools.
-* **Rich, Countable DTOs:** Returns a typed `ScaffoldResult` object implementing `\Countable` with granular file status arrays (`createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`, `rawCopiedFiles`, `unresolvedTokens`) and expressive inspection methods.
+* **Rich DTO Architecture:** Returns a typed `ScaffoldResult` object with granular file status arrays (`createdFiles`, `overwrittenFiles`, `skippedFiles`, `overrideFiles`, `rawCopiedFiles`, `unresolvedTokens`) and combined `$renderedFiles` for clear inspection.
 
 ---
 
@@ -183,15 +183,14 @@ class MakeModuleCommand extends Command
     {
         $name = trim((string) $this->argument('name'));
 
-        $result = $this->engine->scaffoldTree(
-            sourceDir: dirname(__DIR__, 2) . '/stubs',
-            targetDir: app_path("Modules/{$name}"),
-            tokens: [
+        $result = $this->engine->from(dirname(__DIR__, 2) . '/stubs')
+            ->to(app_path("Modules/{$name}"))
+            ->withTokens([
                 '{{ moduleName }}' => $name,
                 '{{ namespace }}' => "App\\Modules\\{$name}",
-            ],
-            overrideDir: base_path('stubs/modules'),
-        );
+            ])
+            ->override(base_path('stubs/modules'))
+            ->scaffold();
 
         $source = $result->overrideFiles !== [] ? 'custom host stubs' : 'default stubs';
         $count = count($result->renderedFiles);
@@ -249,23 +248,19 @@ use AlexKassel\StubEngine\Facades\StubEngine;
 
 // Strategy A: Overlay (Default cascading merge)
 // If the override directory contains 1 file out of 10, the other 9 package defaults are preserved.
-$result = StubEngine::scaffoldTree(
-    sourceDir: __DIR__ . '/../stubs',
-    targetDir: base_path('app/Modules/Billing'),
-    tokens: ['name' => 'Billing'],
-    overrideDir: base_path('stubs/modules'),
-    strategy: OverrideStrategy::Overlay,
-);
+$result = StubEngine::from(__DIR__ . '/../stubs')
+    ->to(base_path('app/Modules/Billing'))
+    ->withTokens(['name' => 'Billing'])
+    ->override(base_path('stubs/modules'))
+    ->scaffold();
 
 // Strategy B: Replace ("All-or-Nothing" complete substitution)
 // Ideal for document packages or custom suites where the consumer directory completely replaces the default layout.
-$docResult = StubEngine::scaffoldTree(
-    sourceDir: __DIR__ . '/../sample_docs',
-    targetDir: storage_path('app/client_docs'),
-    tokens: ['client' => 'Globex'],
-    overrideDir: base_path('stubs/client_docs'),
-    strategy: OverrideStrategy::Replace,
-);
+$docResult = StubEngine::from(__DIR__ . '/../sample_docs')
+    ->to(storage_path('app/client_docs'))
+    ->withTokens(['client' => 'Globex'])
+    ->override(base_path('stubs/client_docs'), OverrideStrategy::Replace)
+    ->scaffold();
 ```
 
 ### 4. Custom Delimiters (Preventing Syntax Collisions)
@@ -273,13 +268,11 @@ $docResult = StubEngine::scaffoldTree(
 When scaffolding templates that already contain Blade, Vue, or bash syntax, specify custom delimiters at runtime or via config:
 
 ```php
-$result = StubEngine::scaffoldTree(
-    sourceDir: __DIR__ . '/../blade_stubs',
-    targetDir: resource_path('views/modules/billing'),
-    tokens: ['entity' => 'user profile'],
-    openDelimiter: '<%',
-    closeDelimiter: '%>',
-);
+$result = StubEngine::from(__DIR__ . '/../blade_stubs')
+    ->to(resource_path('views/modules/billing'))
+    ->withTokens(['entity' => 'user profile'])
+    ->delimiters('<%', '%>')
+    ->scaffold();
 ```
 
 In your stubs and file paths, use `<% entity|studly %>` or `<% entity|kebab %>`, while preserving native Blade syntax like `{{ $user->name }}` without interference.
@@ -289,13 +282,12 @@ In your stubs and file paths, use `<% entity|studly %>` or `<% entity|kebab %>`,
 Tokens can be automatically transformed using built-in pipe modifiers in both file contents and file paths:
 
 ```php
-$result = StubEngine::scaffoldTree(
-    sourceDir: __DIR__ . '/../stubs',
-    targetDir: base_path('app/Modules/Billing'),
-    tokens: [
+$result = StubEngine::from(__DIR__ . '/../stubs')
+    ->to(base_path('app/Modules/Billing'))
+    ->withTokens([
         'entity' => 'user profile',
-    ],
-);
+    ])
+    ->scaffold();
 ```
 
 In any stub file or file path, you can use:
@@ -308,6 +300,7 @@ In any stub file or file path, you can use:
 * `{{ entity|title }}` → `User Profile`
 * `{{ entity|plural }}` → `user profiles`
 * `{{ entity|singular }}` → `user profile`
+* `{{ entity|trim }}` → `user profile` (whitespace stripped)
 
 #### Registering Custom Modifiers
 
@@ -345,17 +338,16 @@ $tokens = StubEngine::extractTokens($content);
 
 ### 7. Inspecting Scaffold Results & Dry-Run Mode
 
-The `ScaffoldResult` object implements `\Countable` and provides fine-grained visibility into file operations:
+The `ScaffoldResult` DTO provides fine-grained visibility into file operations through strongly-typed, public readonly properties:
 
 ```php
-$result = StubEngine::scaffoldTree(
-    sourceDir: __DIR__ . '/../stubs',
-    targetDir: base_path('packages/acme/my-tool'),
-    tokens: ['name' => 'MyTool'],
-    overrideDir: base_path('stubs/custom'),
-    force: false,   // Skip existing files
-    dryRun: true,   // Preview changes without writing to disk
-);
+$result = StubEngine::from(__DIR__ . '/../stubs')
+    ->to(base_path('packages/acme/my-tool'))
+    ->withTokens(['name' => 'MyTool'])
+    ->override(base_path('stubs/custom'))
+    ->force(false) // Skip existing files
+    ->dryRun(true) // Preview changes without writing to disk
+    ->scaffold();
 
 // Count of rendered files
 echo count($result->renderedFiles);
@@ -376,6 +368,16 @@ if ($result->skippedFiles !== []) {
     echo "Some files already existed and were protected from overwriting.";
 }
 ```
+
+---
+
+## Documentation
+
+Comprehensive deep-dive guides are available in the [`docs/`](docs/) directory:
+
+* **[Fluent ScaffoldBuilder Guide](docs/fluent-builder.md):** Complete guide to the chainable builder API (`from()`, `to()`, `withTokens()`, `override()`), conditional steps (`when()`, `unless()`), macro extensions, and detailed operational flags (`force()`, `dryRun()`, `strict()`, `delimiters()`, `ignore()`, `onProgress()`).
+* **[Token Modifiers Guide](docs/modifiers.md):** Exhaustive reference for built-in string transformations (`studly`, `camel`, `kebab`, `snake`, `lower`, `upper`, `title`, `plural`, `singular`, `trim`), modifier chaining (`{{ model|snake|plural }}`), custom modifier registration, and Blade `@{{ ... }}` escaping.
+* **[Architecture & Guide](docs/stub-engine.md):** Architecture overview, DI singleton lifecycle, custom macros on the engine, and raw token diagnostics via `extractTokens()`.
 
 ---
 
