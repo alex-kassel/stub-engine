@@ -365,15 +365,15 @@ class StubEngineTest extends TestCase
         $targetDir = "{$this->tempDir}/custom_delim_output";
 
         $this->files->ensureDirectoryExists("{$stubsDir}/src");
-        $this->files->put("{$stubsDir}/src/<% module|studly %>.php.stub", 'namespace App\\<% module|studly %>; class <% module|studly %> {}');
+        $this->files->put("{$stubsDir}/src/[[ module ]].php.stub", 'namespace App\\[[ module|studly ]]; class [[ module|studly ]] {}');
 
         $engine = $this->engine();
         $result = $engine->scaffold(new ScaffoldRequest(
             source: $stubsDir,
             target: $targetDir,
-            tokens: ['module' => 'billing service'],
-            openDelimiter: '<%',
-            closeDelimiter: '%>',
+            tokens: ['module' => 'BillingService'],
+            openDelimiter: '[[',
+            closeDelimiter: ']]',
         ));
 
         $this->assertCount(1, $result->renderedFiles);
