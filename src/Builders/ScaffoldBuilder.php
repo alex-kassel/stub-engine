@@ -25,7 +25,7 @@ class ScaffoldBuilder
     public function __construct(
         protected StubEngine $engine,
     ) {
-        $this->options = (new ScaffoldRequest(''))->toArray();
+        $this->options = app(ScaffoldRequest::class, ['source' => ''])->toArray();
     }
 
     /**
@@ -165,7 +165,7 @@ class ScaffoldBuilder
      */
     public function toRequest(): ScaffoldRequest
     {
-        return new ScaffoldRequest(...$this->options);
+        return app(ScaffoldRequest::class, $this->options);
     }
 
     /**
